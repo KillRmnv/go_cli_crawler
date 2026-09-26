@@ -11,7 +11,15 @@ type CrawlerConfig struct{
 	requestTimeout time.Duration
 	output string
 	log string
+	retry int
+	delay time.Duration
 	
+}
+func(config*CrawlerConfig) SetDelay( delayTimeout time.Duration ){
+	config.delay=delayTimeout
+}
+func(config*CrawlerConfig) SetRetry(amount int ){
+	config.retry=amount
 }
 func(config*CrawlerConfig) SetUrls(substrOfParams string ){
 	
