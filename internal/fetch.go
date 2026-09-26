@@ -9,8 +9,8 @@ import (
 	"time"
 )
 type FetchClient struct{
-	client http.Client
-	errStatusLogger log.Logger
+	client http.Client // потокобезопасен
+	errStatusLogger log.Logger // базовая реализация логгера потокобезопасна
 }
 func (client* FetchClient) Init(config*CrawlerConfig){
 	client.client=http.Client{
@@ -24,8 +24,8 @@ func (client* FetchClient) extractErrStatusLogFilepath(logFilepath string) strin
 	for ; i> -1&&logFilepath[i]!='.';i--{}
 	return logFilepath[:i]+"_error."+logFilepath[i+1:]
 }
+//планировщик go самостоятельно распределит ресурсы между корутинами, поэтому тут не вижу смысла параллелить
 func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliCrawler) string{
-
 	retryAmount:=0
 	for{
 		select{
@@ -53,9 +53,12 @@ func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliC
 					if(err!=nil){
 						crawler.crawlerLogger.Println("Error while reading body:"+err.Error())
 					}
+					crawler.visited.Add(url)
 					return string(body)
 				}else{
 					crawler.crawlerLogger.Println("Can not reach resource:"+url)
+					crawler.visited.Add(url)
+					return ""
 				}
 		}
 	}		

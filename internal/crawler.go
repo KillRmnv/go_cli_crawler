@@ -7,13 +7,15 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"sync"
+
 	"github.com/deckarep/golang-set/v2"
 )
 type CliCrawler struct{
-	config CrawlerConfig
-	visited mapset.Set[string]
-	crawlerLogger log.Logger
-	fetchClient FetchClient
+	config CrawlerConfig // только чтение, поэтому также безопасен
+	visited mapset.Set[string] // потокобезопасная реализация множества
+	crawlerLogger log.Logger // базовая реализация логгера потокобезопасна
+	fetchClient FetchClient // потокоьезопасен
 }
 
 func (crawler* CliCrawler) Init(config CrawlerConfig){
@@ -26,12 +28,19 @@ func (crawler* CliCrawler) Init(config CrawlerConfig){
 func (crawler* CliCrawler) crawle() ([]byte,error){
 	result:=make([]ResourseNode,10)
 	ctx, cancel := context.WithTimeout(context.Background(), crawler.config.timeout)
+	var wg sync.WaitGroup
 	defer cancel()
 
 	resourseChans:=make(chan ResourseNode,10)
 	for i:=0;i<len(crawler.config.urls);i++ {
-		go	crawler.crawleInside(0,ctx,crawler.config.urls[i],resourseChans)
+		wg.Add(1)
+		go	crawler.crawleInside(0,ctx,crawler.config.urls[i],resourseChans,&wg)
 	}
+	go func() {
+			wg.Wait() 
+			close(resourseChans) 
+			crawler.crawlerLogger.Println("Closing chans for root")
+	}()
 	loop:
 	for{
 		select{
@@ -41,26 +50,43 @@ func (crawler* CliCrawler) crawle() ([]byte,error){
 				break loop
 		}	
 	}
-	return json.Marshal(result)
+	json,err:=json.Marshal(result)
+	if err!=nil{
+		crawler.crawlerLogger.Println("Error occured while serializing")
+	}
+	os.WriteFile(crawler.config.output,json,os.FileMode(os.O_RDWR))
+	return json,nil
 }
-
-func (crawler* CliCrawler) crawleInside(depth int,ctx context.Context,url string, resources chan ResourseNode) {
+// depth должна копироваться, ctx интерфейс, поэтому по дефолту ссылка
+func (crawler* CliCrawler) crawleInside(depth int,ctx context.Context,url string, resources chan ResourseNode,wgParent* sync.WaitGroup) { 
+	defer wgParent.Done()
 	depth++
 	if(depth>crawler.config.depth){
-		// exit 
+		crawler.crawlerLogger.Println("Max depth reached:"+strconv.Itoa(depth))
+		return
 	}
 	page:=crawler.fetchClient.FetchPage(ctx,url,crawler)
+	if len(page)==0{
+		return
+	}
 	var resourceNode ResourseNode
 	resourceNode=parsePage(&page,crawler)
 	resourseChans:=make(chan ResourseNode,10)
+	var wg sync.WaitGroup
 	for _,v:=range resourceNode.Links{
 		if(!crawler.visited.Contains(v.Resourse)){
 			crawler.crawlerLogger.Println("["+resourceNode.Resourse+"]"+"Crawling to "+v.Resourse)	
-		    go	crawler.crawleInside(depth,ctx,v.Resourse,resourseChans)
+			wg.Add(1)
+		    go	crawler.crawleInside(depth,ctx,v.Resourse,resourseChans,&wg)
 		}else{
 			crawler.crawlerLogger.Println("["+resourceNode.Resourse+"]"+"Found already visited link "+v.Resourse)
 		}
 	}
+	go func() {
+			wg.Wait() 
+			close(resourseChans) 
+			crawler.crawlerLogger.Println("Closing chans for "+url)
+	}()
 	loop:
 	for{
 		select{
