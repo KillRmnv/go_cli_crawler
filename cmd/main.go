@@ -39,4 +39,5 @@ func main() {
 	config.SetDelay(*delay)
 	var crawler clicrawler.CliCrawler
 	crawler.Init(config)
+	crawler.Crawle()
 }

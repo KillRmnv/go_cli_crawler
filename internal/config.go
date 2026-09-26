@@ -2,6 +2,7 @@ package clicrawler
 
 import (
 	"time"
+
 )
 
 type CrawlerConfig struct{
@@ -22,6 +23,14 @@ func(config*CrawlerConfig) SetRetry(amount int ){
 	config.retry=amount
 }
 func(config*CrawlerConfig) SetUrls(substrOfParams string ){
+	start:=0
+	for i:=0;i<len(substrOfParams);i++{
+		if(substrOfParams[i]==','){
+			config.urls=append(config.urls, substrOfParams[start:i])
+			start=i+1
+		}
+	}
+	config.urls=append(config.urls,substrOfParams[start:])
 	
 }
 func(config*CrawlerConfig) SetDepth(depth int ){

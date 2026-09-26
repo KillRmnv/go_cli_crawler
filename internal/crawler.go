@@ -25,7 +25,7 @@ func (crawler* CliCrawler) Init(config CrawlerConfig){
 	crawler.fetchClient.Init(&config)
 }
 
-func (crawler* CliCrawler) crawle() ([]byte,error){
+func (crawler* CliCrawler) Crawle() ([]byte,error){
 	result:=make([]ResourseNode,10)
 	ctx, cancel := context.WithTimeout(context.Background(), crawler.config.timeout)
 	var wg sync.WaitGroup
@@ -70,7 +70,7 @@ func (crawler* CliCrawler) crawleInside(depth int,ctx context.Context,url string
 		return
 	}
 	var resourceNode ResourseNode
-	resourceNode=parsePage(&page,crawler)
+	resourceNode=crawler.parsePage(&page)
 	resourseChans:=make(chan ResourseNode,10)
 	var wg sync.WaitGroup
 	for _,v:=range resourceNode.Links{
@@ -100,7 +100,7 @@ func (crawler* CliCrawler) crawleInside(depth int,ctx context.Context,url string
 }
 
 
-func parsePage(page* string, crawler* CliCrawler) ResourseNode{
+func ( crawler* CliCrawler) parsePage(page* string) ResourseNode{
 	var resorce ResourseNode
 	reTitle:=regexp.MustCompile("<title>.*</title>")
 	title:=reTitle.FindString(*page)
