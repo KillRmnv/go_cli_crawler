@@ -1,17 +1,16 @@
 package clicrawler
 
 import (
-
 	"time"
 )
 const(
 	Depth=10
-	Timeout =10
-	RequestTimeout=2
+	Timeout =2*time.Minute
+	RequestTimeout=10*time.Second
 	OutputFilepath="./out/result.json"
 	LogFilepath="./log/crawler.log"
 	Retry=1
-	Delay=0
+	Delay=0*time.Second
 )
 type CrawlerConfig struct{
 	urls[] string
@@ -29,6 +28,11 @@ func(config*CrawlerConfig) SetDelay( delayTimeout time.Duration ){
 }
 func(config*CrawlerConfig) SetRetry(amount int ){
 	config.retry=amount
+}
+func (config*CrawlerConfig) SetUrlsSlice(slice []string){
+	for _,v:=range slice{
+		config.urls=append(config.urls, v)
+	}
 }
 func(config*CrawlerConfig) SetUrls(substrOfParams string ){
 	start:=0

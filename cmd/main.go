@@ -3,15 +3,14 @@ package main
 import (
 	"crawler/internal"
 	"flag"
-	"time"
 )
 
 func main() {
 
 	urls := flag.String("urls", "", "a urls to crawl")
 	depth := flag.Int("depth", clicrawler.Depth, "a recursion depth")
-	timeout := flag.Duration("timeout", time.Second*clicrawler.Timeout, "an overall timeout for application")
-	reqTimeout := flag.Duration("request-timeout", time.Minute*clicrawler.RequestTimeout, "a timeout for a single request")
+	timeout := flag.Duration("timeout", clicrawler.Timeout, "an overall timeout for application")
+	reqTimeout := flag.Duration("request-timeout", clicrawler.RequestTimeout, "a timeout for a single request")
 	output := flag.String("output", clicrawler.OutputFilepath, "an output json filepath")
 	logPath := flag.String("log", clicrawler.LogFilepath, "a log filepath")
 	retry:=flag.Int("retry",clicrawler.Retry,"amount of request retries")
@@ -29,6 +28,6 @@ func main() {
 	config.SetRetry(*retry)
 	config.SetDelay(*delay)
 	var crawler clicrawler.CliCrawler
-	crawler.Init(config)
+	crawler.Init(&config)
 	crawler.Crawle()
 }
