@@ -6,8 +6,10 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"runtime"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"github.com/deckarep/golang-set/v2"
 )
@@ -16,6 +18,8 @@ type CliCrawler struct{
 	visited mapset.Set[string] // потокобезопасная реализация множества
 	crawlerLogger log.Logger // базовая реализация логгера потокобезопасна
 	fetchClient FetchClient // потокоьезопасен
+	atomicCounter atomic.Int32
+	amountOfGorutines int // потокобезопасно: инициализируется и читается
 }
 
 func (crawler* CliCrawler) Init(config CrawlerConfig){
@@ -23,6 +27,8 @@ func (crawler* CliCrawler) Init(config CrawlerConfig){
 	crawler.crawlerLogger=*log.New(file, "[CRAWLER] ", log.Lshortfile)
 	crawler.visited=mapset.NewSet[string]()
 	crawler.fetchClient.Init(&config)
+	crawler.atomicCounter.Store(0)
+	crawler.amountOfGorutines=runtime.NumCPU()*3
 }
 
 func (crawler* CliCrawler) Crawle() ([]byte,error){
@@ -34,7 +40,13 @@ func (crawler* CliCrawler) Crawle() ([]byte,error){
 	resourseChans:=make(chan ResourseNode,10)
 	for i:=0;i<len(crawler.config.urls);i++ {
 		wg.Add(1)
-		go	crawler.crawleInside(0,ctx,crawler.config.urls[i],resourseChans,&wg)
+		if(crawler.atomicCounter.Load()<int32(crawler.amountOfGorutines)){
+			
+			crawler.atomicCounter.Add(1)
+			go	crawler.crawleInside(0,ctx,crawler.config.urls[i],resourseChans,&wg)
+		}else{
+			crawler.crawleInside(0,ctx,crawler.config.urls[i],resourseChans,&wg)
+		}
 	}
 	go func() {
 			wg.Wait() 
@@ -77,7 +89,12 @@ func (crawler* CliCrawler) crawleInside(depth int,ctx context.Context,url string
 		if(!crawler.visited.Contains(v.Resourse)){
 			crawler.crawlerLogger.Println("["+resourceNode.Resourse+"]"+"Crawling to "+v.Resourse)	
 			wg.Add(1)
-		    go	crawler.crawleInside(depth,ctx,v.Resourse,resourseChans,&wg)
+			if(crawler.atomicCounter.Load()<int32(crawler.amountOfGorutines)){
+				crawler.atomicCounter.Add(1)
+		    	go	crawler.crawleInside(depth,ctx,v.Resourse,resourseChans,&wg)
+			}else{
+				crawler.crawleInside(depth,ctx,v.Resourse,resourseChans,&wg)
+			}
 		}else{
 			crawler.crawlerLogger.Println("["+resourceNode.Resourse+"]"+"Found already visited link "+v.Resourse)
 		}

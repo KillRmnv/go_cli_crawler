@@ -1,10 +1,18 @@
 package clicrawler
 
 import (
+
 	"time"
-
 )
-
+const(
+	Depth=10
+	Timeout =10
+	RequestTimeout=2
+	OutputFilepath="./out/result.json"
+	LogFilepath="./log/crawler.log"
+	Retry=1
+	Delay=0
+)
 type CrawlerConfig struct{
 	urls[] string
 	depth int

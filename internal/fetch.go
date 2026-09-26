@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 type FetchClient struct{
@@ -59,9 +60,12 @@ func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliC
 								return ""
 							}
 					}
-					
 					defer resp.Body.Close()
-					
+					contentType := resp.Header.Get("Content-Type")
+					if !strings.Contains(contentType, "text/html") {
+					    crawler.crawlerLogger.Println("Пропущен не-HTML ресурс:"+url+ " Тип:"+ contentType)
+					    return ""
+					}			
 					client.errStatusLogger.Println("Request status code:"+resp.Status)
 					body,err:=io.ReadAll(resp.Body)
 					if(err!=nil){

@@ -5,26 +5,17 @@ import (
 	"flag"
 	"time"
 )
-const(
-	depth=10
-	timeout =10
-	requestTimeout=2
-	outputFilepath="./out/result.json"
-	logFilepath="./log/crawler.log"
-	retry=1
-	delay=0
-)
 
 func main() {
 
 	urls := flag.String("urls", "", "a urls to crawl")
-	depth := flag.Int("depth", depth, "a recursion depth")
-	timeout := flag.Duration("timeout", time.Second*timeout, "an overall timeout for application")
-	reqTimeout := flag.Duration("request-timeout", time.Minute*requestTimeout, "a timeout for a single request")
-	output := flag.String("output", outputFilepath, "an output json filepath")
-	logPath := flag.String("log", logFilepath, "a log filepath")
-	retry:=flag.Int("retry",retry,"amount of request retries")
-	delay:=flag.Duration("delay",delay,"time between to requests")
+	depth := flag.Int("depth", clicrawler.Depth, "a recursion depth")
+	timeout := flag.Duration("timeout", time.Second*clicrawler.Timeout, "an overall timeout for application")
+	reqTimeout := flag.Duration("request-timeout", time.Minute*clicrawler.RequestTimeout, "a timeout for a single request")
+	output := flag.String("output", clicrawler.OutputFilepath, "an output json filepath")
+	logPath := flag.String("log", clicrawler.LogFilepath, "a log filepath")
+	retry:=flag.Int("retry",clicrawler.Retry,"amount of request retries")
+	delay:=flag.Duration("delay",clicrawler.Delay,"time between to requests")
 	
 	flag.Parse() 
 	
