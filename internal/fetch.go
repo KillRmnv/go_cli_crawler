@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -18,7 +19,12 @@ func (client* FetchClient) Init(config*CrawlerConfig){
 	client.client=http.Client{
     	Timeout: config.requestTimeout,
 	}
-	file, err := os.OpenFile(client.extractErrStatusLogFilepath(config.log), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	logErrFilepath:=client.extractErrStatusLogFilepath(config.log)
+	dir := filepath.Dir(logErrFilepath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Fatal("Can not create directory for logs:"+ err.Error())
+	}
+	file, err := os.OpenFile(logErrFilepath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 			log.Println("Can not open log file"+ err.Error())
 	}
@@ -26,23 +32,28 @@ func (client* FetchClient) Init(config*CrawlerConfig){
 	client.semaphore = make(chan struct{}, 10)
 }
 func (client* FetchClient) extractErrStatusLogFilepath(logFilepath string) string{
+	logFilepath=strings.Trim(logFilepath," ")
 	i:=len(logFilepath)-1
-	for ; i> -1&&logFilepath[i]!='.';i--{}
-	return logFilepath[:i]+"_error."+logFilepath[i+1:]
+	for ; i> 0&&logFilepath[i]!='.';i--{}
+	if logFilepath[i]=='.'{
+		return logFilepath[:i]+"_error."+logFilepath[i+1:]
+	}else{
+		return logFilepath+"_error.log"
+	}
 }
 //планировщик go самостоятельно распределит ресурсы между корутинами, поэтому тут не вижу смысла параллелить
 func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliCrawler) string{
+	crawler.crawlerLogger.Println("Trying to fetch:"+url)
 	select {
 		case client.semaphore <- struct{}{}: 
 			defer func() { <-client.semaphore }()
 		case <-ctx.Done():
 			crawler.crawlerLogger.Println("Gracefully stopping fetching (in queue)")
 			return ""
-		}
+	}
 	retryAmount:=0
 	for{
-		select{
-			
+		select{	
 			case <-ctx.Done():
 				crawler.crawlerLogger.Println("Gracefully stopping fetching")
 				return ""
@@ -57,13 +68,14 @@ func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliC
 								crawler.crawlerLogger.Println("Gorutine try's again after delay:"+url)
 								continue
 							case <-ctx.Done():
+								crawler.crawlerLogger.Println("Gracefully stopping waiting")
 								return ""
 							}
 					}
 					defer resp.Body.Close()
 					contentType := resp.Header.Get("Content-Type")
 					if !strings.Contains(contentType, "text/html") {
-					    crawler.crawlerLogger.Println("Пропущен не-HTML ресурс:"+url+ " Тип:"+ contentType)
+					    crawler.crawlerLogger.Println("Skip non HTML resource:"+url+ " Тип:"+ contentType)
 					    return ""
 					}			
 					client.errStatusLogger.Println("Request status code:"+resp.Status)
@@ -80,5 +92,4 @@ func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliC
 				}
 		}
 	}		
-	
 }
