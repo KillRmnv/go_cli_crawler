@@ -15,14 +15,23 @@ const(
 
 func main() {
 
-	config:=clicrawler.CrawlerConfig{}
-	config.SetUrls(*flag.String("urls", "", "a urls to crawle"))
-	config.SetDepth(*flag.Int("depth",depth,"a recursion depth"))
-	config.SetTimeout(*flag.Duration("timeout",time.Second*timeout,"an overall timeout for application"))
-	config.SetRequestTimeout(*flag.Duration("request-timeout",time.Minute*requestTimeout,"an overall timeout for application"))
-	config.SetOutput(*flag.String("output",outputFilepath,"an output json with result filepath"))
-	config.SetLog(*flag.String("log",logFilepath,"a log filepath"))
-	flag.Parse()
-
+	urls := flag.String("urls", "", "a urls to crawl")
+	depth := flag.Int("depth", depth, "a recursion depth")
+	timeout := flag.Duration("timeout", time.Second*timeout, "an overall timeout for application")
+	reqTimeout := flag.Duration("request-timeout", time.Minute*requestTimeout, "a timeout for a single request")
+	output := flag.String("output", outputFilepath, "an output json filepath")
+	logPath := flag.String("log", logFilepath, "a log filepath")
 	
+	flag.Parse() 
+	
+	config := clicrawler.CrawlerConfig{}
+	config.SetUrls(*urls)
+	config.SetDepth(*depth)
+	config.SetTimeout(*timeout)
+	config.SetRequestTimeout(*reqTimeout)
+	config.SetOutput(*output)
+	config.SetLog(*logPath)
+
+	var crawler clicrawler.CliCrawler
+	crawler.Init(config)
 }
