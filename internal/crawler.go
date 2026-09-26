@@ -13,12 +13,16 @@ type CliCrawler struct{
 	config CrawlerConfig
 	visited mapset.Set[string]
 	crawlerLogger log.Logger
+	fetchClient FetchClient
 }
 
 func (crawler* CliCrawler) Init(config CrawlerConfig){
 	file, _ := os.OpenFile(config.log, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	crawler.crawlerLogger=*log.New(file, "[CRAWLER] ", log.Lshortfile)
+	crawler.visited=mapset.NewSet[string]()
+	crawler.fetchClient.Init(&config)
 }
+
 func (crawler* CliCrawler) crawle() ([]byte,error){
 	result:=make([]ResourseNode,10)
 	ctx, cancel := context.WithTimeout(context.Background(), crawler.config.timeout)
@@ -28,10 +32,15 @@ func (crawler* CliCrawler) crawle() ([]byte,error){
 	for i:=0;i<len(crawler.config.urls);i++ {
 		go	crawler.crawleInside(0,ctx,crawler.config.urls[i],resourseChans)
 	}
-	for resource := range resourseChans {
-    	result = append(result, resource)
+	loop:
+	for{
+		select{
+			case resource:=<-resourseChans:
+		 		result= append(result , resource)
+			case <-ctx.Done():
+				break loop
+		}	
 	}
-	
 	return json.Marshal(result)
 }
 
@@ -40,7 +49,7 @@ func (crawler* CliCrawler) crawleInside(depth int,ctx context.Context,url string
 	if(depth>crawler.config.depth){
 		// exit 
 	}
-	page:=fetchPage(ctx,url,&crawler.visited)
+	page:=crawler.fetchClient.FetchPage(ctx,url,crawler)
 	var resourceNode ResourseNode
 	resourceNode=parsePage(&page,crawler)
 	resourseChans:=make(chan ResourseNode,10)
@@ -52,10 +61,15 @@ func (crawler* CliCrawler) crawleInside(depth int,ctx context.Context,url string
 			crawler.crawlerLogger.Println("["+resourceNode.Resourse+"]"+"Found already visited link "+v.Resourse)
 		}
 	}
-	for resource := range resourseChans {
-    	resourceNode.Links = append(resourceNode.Links , resource)
+	loop:
+	for{
+		select{
+			case resource:=<-resourseChans:
+				resourceNode.Links = append(resourceNode.Links , resource)
+			case <-ctx.Done():
+				break loop
+		}	
 	}
-	
 	resources<-resourceNode
 }
 
