@@ -31,6 +31,7 @@ func (client* FetchClient) Init(config*CrawlerConfig){
 	client.errStatusLogger=*log.New(file, "[FETCH CLIENT] ", log.Lshortfile)
 	client.semaphore = make(chan struct{}, 10)
 }
+
 func (client* FetchClient) extractErrStatusLogFilepath(logFilepath string) string{
 	logFilepath=strings.Trim(logFilepath," ")
 	i:=len(logFilepath)-1
@@ -43,6 +44,9 @@ func (client* FetchClient) extractErrStatusLogFilepath(logFilepath string) strin
 }
 //планировщик go самостоятельно распределит ресурсы между корутинами, поэтому тут не вижу смысла параллелить
 func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliCrawler) string{
+	if ctx.Err()!=nil{
+		return ""
+	}
 	crawler.crawlerLogger.Println("Trying to fetch:"+url)
 	select {
 		case client.semaphore <- struct{}{}: 
@@ -60,7 +64,7 @@ func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliC
 			default:
 				if !isOkFormat{
 					if(retryAmount<crawler.config.retry){
-						isHtml,isContinue:=client.processHeader(ctx,url,crawler,&retryAmount)
+						isHtml,isContinue:=client.processHead(ctx,url,crawler,&retryAmount)
 						crawler.visited.Add(url)
 						if isContinue{
 							continue
@@ -89,6 +93,7 @@ func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliC
 		}
 	}		
 }
+
 func(client* FetchClient) processGet(ctx context.Context,url string,crawler *CliCrawler, retryAmount* int) (string,bool){
 	resp, err := client.client.Get(url)
 	if err!=nil{
@@ -113,7 +118,7 @@ func(client* FetchClient) processGet(ctx context.Context,url string,crawler *Cli
 	return string(body),false
 }
 
-func(client* FetchClient) processHeader(ctx context.Context,url string,crawler *CliCrawler, retryAmount* int) (bool,bool){
+func(client* FetchClient) processHead(ctx context.Context,url string,crawler *CliCrawler, retryAmount* int) (bool,bool){
 	resp, err := client.client.Head(url)
 	if err!=nil{
 		client.errStatusLogger.Println("Error while get request:"+err.Error())

@@ -2,9 +2,11 @@ package clicrawler
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -12,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 	"github.com/deckarep/golang-set/v2"
 )
@@ -67,125 +70,138 @@ func (crawler* CliCrawler) Crawle() ([]byte,error){
 	defer stop()
 	ctx, cancel := context.WithTimeout(signalCtx, crawler.config.timeout)
 	defer cancel()
-
-	resourseChans:=make(chan ResourseNode,10)
-	for i:=0;i<len(crawler.config.urls);i++ {
-		wg.Add(1)
-		domain,err:=crawler.config.urls[i].ExtractDomain()
-		if(err!=nil){
-			crawler.crawlerLogger.Println("Invalid domain:"+crawler.config.urls[i].adress)
-			crawler.config.urls=append(crawler.config.urls[:i],crawler.config.urls[i+1:]...)
-		}else{
-			crawler.crawlerLogger.Printf("Extracted domain:%v for %v\n",domain,crawler.config.urls[i])
-			
+	go func() {
+		<-ctx.Done()
+		stop() 
+	}()
+	links,domains:=crawler.extractUrlDomain()
+	resourseChans:=make(chan ResourseNode,crawler.amountOfGorutines)
+	var wg sync.WaitGroup
+	go func() {
+		defer close(resourseChans)
+		for i:=0;i<len(links);i++ {
+			seedURL,seedDomain:=links[i],&domains[i]
+			if(!crawler.visited.Add(seedURL.adress)){
+				crawler.crawlerLogger.Println("Skip already visited seed: "+seedURL.adress)
+				continue
+			}
+			wg.Add(1)
 			if(crawler.atomicCounter.Load()<int32(crawler.amountOfGorutines)){
 				crawler.atomicCounter.Add(1)
-				go	crawler.crawleInside(0,ctx,crawler.config.urls[i],resourseChans,&wg,&domain)
+				go func(){
+					defer crawler.atomicCounter.Add(-1)
+					crawler.crawleInside(0,ctx,seedURL,resourseChans,&wg,seedDomain)
+				}()
 			}else{
-				crawler.crawlerLogger.Println("Reach gorutines limit:"+crawler.config.urls[i].adress)
-				crawler.crawleInside(0,ctx,crawler.config.urls[i],resourseChans,&wg,&domain)
+				crawler.crawlerLogger.Println("Reach gorutines limit:"+seedURL.adress)
+				crawler.crawleInside(0,ctx,seedURL,resourseChans,&wg,seedDomain)
 			}
 		}
-	}
-	go func() {
-			wg.Wait() 
-			close(resourseChans) 
-			crawler.crawlerLogger.Println("Closing chans for root")
+		wg.Wait()
+		crawler.crawlerLogger.Println("Closing chans for root")
 	}()
-	loop:
-	for{
-		select{
-			case resource,ok:=<-resourseChans:
-				if!ok{
-					break loop
-				}
-		 		result= append(result , resource)
-			case <-ctx.Done():
-			for resource:=range resourseChans{
-				result= append(result , resource)
-			}
-			break loop
-		}	
+
+	for resource:=range resourseChans{
+		result=append(result,resource)
 	}
-	json,err:=json.Marshal(result)
+
+	data,err:=json.Marshal(result,jsontext.AllowInvalidUTF8(true))
 	if err!=nil{
-		crawler.crawlerLogger.Println("Error occured while serializing")
+		crawler.crawlerLogger.Println("Error occured while serializing:"+err.Error())
+		return nil,err
 	}
-	os.WriteFile(crawler.config.output,json,os.FileMode(os.O_RDWR))
-	return json,nil
+	crawler.crawlerLogger.Println("Saving to file "+crawler.config.output)
+	if err:=os.WriteFile(crawler.config.output,data,0644); err!=nil{
+		crawler.crawlerLogger.Println("Can not write result to "+crawler.config.output+":"+err.Error())
+		return nil,err
+	}
+	return data,nil
 }
 // depth должна копироваться, ctx интерфейс, поэтому по дефолту ссылка
 func (crawler* CliCrawler) crawleInside(depth int,ctx context.Context,url Url, resources chan ResourseNode,wgParent* sync.WaitGroup,domain*string) { 
 	defer wgParent.Done()
-	defer crawler.atomicCounter.Add(-1)
 	depth++
 	if(depth>crawler.config.depth){
-		crawler.crawlerLogger.Println("Max depth reached:"+strconv.Itoa(depth))
 		return
 	}
 	page:=crawler.fetchClient.FetchPage(ctx,url.adress,crawler)
 	if len(page)==0{
 		return
 	}
-	var resourceNode ResourseNode
-	resourceNode=crawler.parsePage(&page,domain)
-	resourseChans:=make(chan ResourseNode,10)
+	resourceNode:=crawler.parsePage(&page,domain)
+	pageUrl:=resourceNode.Resourse
+	links:=append([]ResourseNode(nil),resourceNode.Links...) 
+	resourseChans:=make(chan ResourseNode,crawler.amountOfGorutines)
 	var wg sync.WaitGroup
-	for _,v:=range resourceNode.Links{
-		if(!crawler.visited.Contains(v.Resourse)){
-			crawler.crawlerLogger.Println("["+resourceNode.Resourse+"]"+"Crawling to "+v.Resourse)	
+
+	go func() {
+		defer close(resourseChans)
+		for _,v:=range links{
+			if(ctx.Err()!=nil){
+				break
+			}
+			if(depth+1>crawler.config.depth){
+				continue
+			}
+			if(!crawler.visited.Add(v.Resourse)){
+				crawler.crawlerLogger.Println("["+pageUrl+"]"+"Found already visited link "+v.Resourse)
+				continue
+			}
+			crawler.crawlerLogger.Println("["+pageUrl+"]"+"Crawling to "+v.Resourse)
 			wg.Add(1)
 			if(crawler.atomicCounter.Load()<int32(crawler.amountOfGorutines)){
 				crawler.atomicCounter.Add(1)
-		    	go	crawler.crawleInside(depth,ctx,NewUrl(v.Resourse),resourseChans,&wg,domain)
+				go func(u Url){
+					defer crawler.atomicCounter.Add(-1)
+					crawler.crawleInside(depth,ctx,u,resourseChans,&wg,domain)
+				}(NewUrl(v.Resourse))
 			}else{
 				crawler.crawleInside(depth,ctx,NewUrl(v.Resourse),resourseChans,&wg,domain)
 			}
-		}else{
-			crawler.crawlerLogger.Println("["+resourceNode.Resourse+"]"+"Found already visited link "+v.Resourse)
 		}
-	}
-	go func() {
-			wg.Wait() 
-			close(resourseChans) 
-			crawler.crawlerLogger.Println("Closing chans for "+url.adress)
+		wg.Wait()
+		crawler.crawlerLogger.Println("Closing chans for "+url.adress)
 	}()
-	loop:
-	for{
-		select{
-			case resource,ok:=<-resourseChans:
-				if !ok{
-					break loop
-				}
-				resourceNode.Links = append(resourceNode.Links , resource)
-			case <-ctx.Done():
-				for resource:= range resourseChans{
-					 resourceNode.Links = append(resourceNode.Links, resource)
-				}
-				break loop
-		}	
+
+	for resource:=range resourseChans{
+		resourceNode.Links=append(resourceNode.Links,resource)
 	}
-	resources<-resourceNode
+
+	if !sendNode(resources,resourceNode,ctx){
+		crawler.crawlerLogger.Println("Node dropped on cancel: "+url.adress)
+	}
 }
 
+func sendNode(resources chan ResourseNode, node ResourseNode, ctx context.Context) bool{
+	select{
+		case resources<-node:
+			return true
+		default:
+			select{
+				case resources<-node:
+					return true
+				case <-ctx.Done():
+					return false
+			}
+	}
+}
 
 func ( crawler* CliCrawler) parsePage(page* string,domainUrl* string) ResourseNode{
 	var resorce ResourseNode
 	reTitle:=regexp.MustCompile("<title>.*</title>")
 	title:=reTitle.FindString(*page)
-	resorce.Title=title[7:len(title)-8]
+	if len(title)>0{
+		resorce.Title=title[7:len(title)-8]
+	}
 	resorce.Resourse=*domainUrl
 	reHref := regexp.MustCompile(`href=[\"']([^\"']+)[\"']`)
 	hrefs:=reHref.FindAll([]byte(*page),-1)
-	crawler.crawlerLogger.Println(2,"Found links on page "+resorce.Title+":"+strconv.Itoa(len(hrefs)))
+	crawler.crawlerLogger.Println("Found links on page "+resorce.Title+":"+strconv.Itoa(len(hrefs)))
 	var links []ResourseNode
 	for _,href:= range hrefs{
-		crawler.crawlerLogger.Println(2,resorce.Title+":"+string(href))
 		hrefParsed:=href[6 : len(href)-1]
 		if strings.Contains(string(hrefParsed),*domainUrl){
 			links=append(links, ResourseNode{Resourse: string(hrefParsed)})
-		}else{
-			crawler.crawlerLogger.Println("Href of not parent domain:"+string(href)+" Parent domain:"+*domainUrl)
 		}
 	}
 	resorce.Links=links
