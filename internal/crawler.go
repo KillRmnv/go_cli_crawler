@@ -53,7 +53,7 @@ func (crawler* CliCrawler) createFile(filePath string) *os.File{
 
 func (crawler* CliCrawler) Init(config* CrawlerConfig){
 	crawler.config=*config 
-	crawler.crawlerLogger=*log.New(crawler.createFile(crawler.config.log), "[CRAWLER] ", log.Lshortfile)
+	crawler.crawlerLogger=*log.New(crawler.createFile(crawler.config.log), "[CRAWLER] ", log.LstdFlags|log.Lshortfile)
 	outFile:=crawler.createFile(crawler.config.output) 
 	crawler.config.SetOutput(outFile.Name())
 	outFile.Close()

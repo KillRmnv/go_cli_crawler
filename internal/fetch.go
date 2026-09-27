@@ -28,7 +28,7 @@ func (client* FetchClient) Init(config*CrawlerConfig){
 	if err != nil {
 			log.Println("Can not open log file"+ err.Error())
 	}
-	client.errStatusLogger=*log.New(file, "[FETCH CLIENT] ", log.Lshortfile)
+	client.errStatusLogger=*log.New(file, "[FETCH CLIENT] ", log.LstdFlags|log.Lshortfile)
 	client.semaphore = make(chan struct{}, 10)
 }
 
@@ -97,7 +97,7 @@ func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliC
 func(client* FetchClient) processGet(ctx context.Context,url string,crawler *CliCrawler, retryAmount* int) (string,bool){
 	resp, err := client.client.Get(url)
 	if err!=nil{
-		client.errStatusLogger.Println("Error while get request:"+err.Error())
+		client.errStatusLogger.Printf("Error while get request:%s",err.Error())
 		*retryAmount++
 		select {
 			case <-time.After(crawler.config.delay):
@@ -110,7 +110,7 @@ func(client* FetchClient) processGet(ctx context.Context,url string,crawler *Cli
 	}
 	defer resp.Body.Close()
 	crawler.visited.Add(url)			
-	client.errStatusLogger.Println("Request status code:"+resp.Status)
+	client.errStatusLogger.Printf("Request status code:%s; Url:%s",resp.Status,url)
 	body,err:=io.ReadAll(resp.Body)
 	if(err!=nil){
 		crawler.crawlerLogger.Println("Error while reading body:"+err.Error())
@@ -138,6 +138,6 @@ func(client* FetchClient) processHead(ctx context.Context,url string,crawler *Cl
 	    crawler.crawlerLogger.Println("Skip non HTML resource:"+url+ " Тип:"+ contentType)
 	    return false,false
 	}			
-	client.errStatusLogger.Println("Request status code:"+resp.Status)
+	client.errStatusLogger.Printf("Request status code:%s; Url:%s",resp.Status,url)
 	return true,false
 }

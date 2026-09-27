@@ -84,19 +84,19 @@ func TestCrawlerConfig_Setters(t *testing.T) {
 	})
 
 	t.Run("SetStubs", func(t *testing.T) {
-		if Stubs != true {
-			t.Errorf("stubs flag must be enabled by default, got %v", Stubs)
+		if Stubs != false {
+			t.Errorf("stubs flag must be disabled by default, got %v", Stubs)
 		}
 		config := &CrawlerConfig{}
 		
-		config.SetStubs(false)
-		
-		if config.stubs != false {
-			t.Errorf("Expected stubs disabled after SetStubs(false)")
-		}
 		config.SetStubs(true)
+		
 		if config.stubs != true {
 			t.Errorf("Expected stubs enabled after SetStubs(true)")
+		}
+		config.SetStubs(false)
+		if config.stubs != false {
+			t.Errorf("Expected stubs disabled after SetStubs(false)")
 		}
 	})
 
