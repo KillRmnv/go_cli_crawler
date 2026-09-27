@@ -49,19 +49,23 @@ func (crawler* CliCrawler) createFile(filePath string) *os.File{
 }
 
 func (crawler* CliCrawler) Init(config* CrawlerConfig){
-	crawler.crawlerLogger=*log.New(crawler.createFile(config.log), "[CRAWLER] ", log.Lshortfile)
-	crawler.config.output= crawler.createFile(config.output).Name()
+	crawler.config=*config 
+	crawler.crawlerLogger=*log.New(crawler.createFile(crawler.config.log), "[CRAWLER] ", log.Lshortfile)
+	outFile:=crawler.createFile(crawler.config.output) 
+	crawler.config.SetOutput(outFile.Name())
+	outFile.Close()
 	crawler.visited=mapset.NewSet[string]()
 	crawler.fetchClient.Init(config)
 	crawler.atomicCounter.Store(0)
 	crawler.amountOfGorutines=runtime.NumCPU()*2
-	crawler.config=*config
 }
 
 func (crawler* CliCrawler) Crawle() ([]byte,error){
 	var result []ResourseNode
-	ctx, cancel := context.WithTimeout(context.Background(), crawler.config.timeout)
-	var wg sync.WaitGroup
+	
+	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(signalCtx, crawler.config.timeout)
 	defer cancel()
 
 	resourseChans:=make(chan ResourseNode,10)
