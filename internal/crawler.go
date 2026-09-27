@@ -192,3 +192,18 @@ func ( crawler* CliCrawler) parsePage(page* string,domainUrl* string) ResourseNo
 	return resorce
 }
 
+func ( crawler* CliCrawler) extractUrlDomain() ([]Url,[]string){
+	var links []Url
+	var domains []string
+	for _,u := range crawler.config.urls{
+		domain,err:=u.ExtractDomain()
+		if(err!=nil){
+			crawler.crawlerLogger.Println("Invalid url: "+u.adress+" ("+err.Error()+")")
+			continue
+		}
+		crawler.crawlerLogger.Printf("Extracted domain:%v for %v\n",domain,u)
+		links=append(links,u)
+		domains=append(domains,domain)
+	}
+	return links, domains
+}
