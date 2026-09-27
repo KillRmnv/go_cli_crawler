@@ -1,5 +1,9 @@
 package clicrawler
 
+import (
+	"errors"
+	neturl "net/url"
+)
 
 type Url struct{
 	adress string
@@ -8,21 +12,18 @@ func NewUrl(adress string) Url{
 	return Url{adress: adress}
 }
 func(url* Url) ExtractDomain() (string,error){
-	slashCounter,i:=2,0
-	for ;i<len(url.adress);i++{
-		if url.adress[i]=='/'{
-			slashCounter--;
-		}
-		if slashCounter==0{
-			break
-		}
+	if url.adress==""{
+		return "",errors.New("empty url")
 	}
-	slashCounter=i+1
-	i++
-	for ;i<len(url.adress);i++{
-		if url.adress[i]=='/' {
-			return url.adress[slashCounter:i],nil	
-		}
+	parsed,err:=neturl.Parse(url.adress)
+	if err!=nil{
+		return "",err
 	}
-	return  url.adress[slashCounter:],nil
+	if parsed.Scheme==""{
+		return "",errors.New("no scheme in url: "+url.adress)
+	}
+	if parsed.Host==""{
+		return "",errors.New("no host in url: "+url.adress)
+	}
+	return parsed.Host,nil
 }
