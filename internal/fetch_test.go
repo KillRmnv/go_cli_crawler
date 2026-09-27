@@ -39,8 +39,8 @@ func TestFetchPage(t *testing.T){
 	var config CrawlerConfig
 	config.SetDelay(Delay)
 	config.SetDepth(Depth)
-	config.SetLog(LogFilepath)
-	config.SetOutput(OutputFilepath)
+	config.SetLog("./log_test/log.log")
+	config.SetOutput("./out_test/out.json")
 	config.SetRequestTimeout(RequestTimeout)
 	config.SetRetry(3)
 	config.SetTimeout(Timeout)
@@ -70,6 +70,7 @@ func TestFetchPage(t *testing.T){
 		result := client.FetchPage(ctx,"https://google.com",&crawler)
 		if len(result)<100 {
 			t.Error("Does not get response:"+ result)
+			
 		}
 	})
 	t.Run("File fetch", func(t *testing.T) {
@@ -89,7 +90,7 @@ func TestFetchPage(t *testing.T){
 	        go func(url string) {
 	            defer wg.Done() 
 	            client.FetchPage(ctx, url, &crawler)    
-	        }(config.urls[i])
+	        }(config.urls[i].adress)
 	        
 	        if i == len(config.urls)-2 {
 	            cancel()
@@ -102,5 +103,28 @@ func TestFetchPage(t *testing.T){
 			t.Error("Log file does not contain grscefull shoutdown log:"+ string(file))
 		}
 	})
+	t.Run("Semaphore test", func(t *testing.T) {
+		var wg sync.WaitGroup 
+		
+	    for i := 0; i < len(config.urls); i++ {
+	        wg.Add(1) 
+	        
+	        go func(url string) {
+	            defer wg.Done() 
+	            client.FetchPage(ctx, url, &crawler)    
+	        }(config.urls[i].adress)
+	        
+	        if i == len(config.urls)-2 {
+	            cancel()
+	        }
+	    }
+			
+	    wg.Wait()
+		file,_:=os.ReadFile(config.log)
+		if(!strings.Contains(string(file),"Gracefully stopping fetching (in queue)")){
+			t.Error("Log file does not contain semaphore shoutdown log:"+ string(file))
+		}
+	})
 	
 }
+
