@@ -3,6 +3,7 @@ package clicrawler
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -33,14 +34,18 @@ func TestExtractErrStatusLogFilepath(t *testing.T) {
 }
 
 func TestFetchPage(t *testing.T){
+	tempDir := t.TempDir()
+	logFile := filepath.Join(tempDir, "log_test", "crawler.log")
+	outFile := filepath.Join(tempDir, "out_test", "result.json")
+
 	client := &FetchClient{}
 	ctx,cancel:=context.WithCancel(context.Background())
 	var crawler CliCrawler
 	var config CrawlerConfig
 	config.SetDelay(Delay)
 	config.SetDepth(Depth)
-	config.SetLog("./log_test/log.log")
-	config.SetOutput("./out_test/out.json")
+	config.SetLog(logFile)
+	config.SetOutput(outFile)
 	config.SetRequestTimeout(RequestTimeout)
 	config.SetRetry(3)
 	config.SetTimeout(Timeout)
