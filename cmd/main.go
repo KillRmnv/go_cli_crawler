@@ -14,7 +14,7 @@ func main() {
 	output := flag.String("output", clicrawler.OutputFilepath, "an output json filepath")
 	logPath := flag.String("log", clicrawler.LogFilepath, "a log filepath")
 	retry:=flag.Int("retry",clicrawler.Retry,"amount of request retries")
-	delay:=flag.Duration("delay",clicrawler.Delay,"time between to requests")
+	delay:=flag.Duration("delay",clicrawler.Delay,"time between two requests on the same url")
 	
 	flag.Parse() 
 	
