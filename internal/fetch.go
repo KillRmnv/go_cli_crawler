@@ -34,13 +34,11 @@ func (client* FetchClient) Init(config*CrawlerConfig){
 
 func (client* FetchClient) extractErrStatusLogFilepath(logFilepath string) string{
 	logFilepath=strings.Trim(logFilepath," ")
-	i:=len(logFilepath)-1
-	for ; i> 0&&logFilepath[i]!='.';i--{}
-	if logFilepath[i]=='.'{
-		return logFilepath[:i]+"_error."+logFilepath[i+1:]
-	}else{
-		return logFilepath+"_error.log"
+	ext:=filepath.Ext(logFilepath)
+	if ext!=""{
+		return logFilepath[:len(logFilepath)-len(ext)]+"_error"+ext
 	}
+	return logFilepath+"_error.log"
 }
 //планировщик go самостоятельно распределит ресурсы между корутинами, поэтому тут не вижу смысла параллелить
 func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliCrawler) string{
@@ -71,14 +69,10 @@ func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliC
 						}
 						if !isHtml {
 							return ""
-						}
-						isOkFormat=true
-						retryAmount=0
-					}else{
-						crawler.crawlerLogger.Println("Can not reach resource:"+url)
-						crawler.visited.Add(url)
-						return ""
+						}		
 					}
+					isOkFormat=true
+					retryAmount=0
 				}
 				if(retryAmount<crawler.config.retry){
 					result,flag:=client.processGet(ctx,url,crawler,&retryAmount)
@@ -133,6 +127,10 @@ func(client* FetchClient) processHead(ctx context.Context,url string,crawler *Cl
 			}
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode>=400{
+		client.errStatusLogger.Printf("Request status code:%s; Url:%s",resp.Status,url)
+		return true,false
+	}
 	contentType := resp.Header.Get("Content-Type")
 	if !strings.Contains(contentType, "text/html") {
 	    crawler.crawlerLogger.Println("Skip non HTML resource:"+url+ " Тип:"+ contentType)

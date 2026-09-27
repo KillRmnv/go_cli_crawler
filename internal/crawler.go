@@ -33,13 +33,13 @@ func (crawler* CliCrawler) createFile(filePath string) *os.File{
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		log.Fatal("Can not create directory for file:"+ err.Error())
 	}
-	_,err := os.OpenFile(filePath,os.O_RDONLY, 0666)
+	checkFile,err := os.OpenFile(filePath,os.O_RDONLY, 0666)
 	if err==nil{
-		i:=len(filePath)-1
+		checkFile.Close()
 		now:=time.Now()
-		for ; i> 0&&filePath[i]!='.';i--{}
-		if filePath[i]=='.'{
-			filePath= filePath[:i]+now.Format("2006-01-02_15_04")+"."+filePath[i+1:]
+		ext:=filepath.Ext(filePath)
+		if ext!=""{
+			filePath= filePath[:len(filePath)-len(ext)]+now.Format("2006-01-02_15_04")+ext
 		}else{
 			filePath= filePath+now.Format("2006-01-02_15_04")+".json"
 		}
@@ -193,17 +193,17 @@ func ( crawler* CliCrawler) parsePage(page* string,domainUrl* string,url string)
 		resorce.Title=title[7:len(title)-8]
 	}
 	resorce.Resourse=url
-	reHref := regexp.MustCompile(`href=[\"']([^\"']+)[\"']`)
-	hrefs:=reHref.FindAll([]byte(*page),-1)
+	reHref := regexp.MustCompile(`(?i)(?:^|[^a-z0-9_-])href\s*=\s*["']([^"']+)["']`)
+	hrefs:=reHref.FindAllStringSubmatch(*page,-1)
 	crawler.crawlerLogger.Println("Found links on page "+resorce.Title+":"+strconv.Itoa(len(hrefs)))
 	var hrefsToCrawl []string
 	var links []ResourseNode
 	for _,href:= range hrefs{
-		hrefParsed:=href[6 : len(href)-1]
-		if strings.Contains(string(hrefParsed),*domainUrl){
-			hrefsToCrawl=append(hrefsToCrawl,string(hrefParsed))
+		hrefParsed:=href[1]
+		if strings.Contains(hrefParsed,*domainUrl){
+			hrefsToCrawl=append(hrefsToCrawl,hrefParsed)
 			if(crawler.config.stubs){
-				links=append(links, ResourseNode{Resourse: string(hrefParsed)})
+				links=append(links, ResourseNode{Resourse: hrefParsed})
 			}
 		}
 	}

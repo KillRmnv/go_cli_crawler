@@ -1,6 +1,7 @@
 package clicrawler
 
 import (
+	"strings"
 	"time"
 )
 const(
@@ -40,15 +41,9 @@ func (config*CrawlerConfig) SetUrlsSlice(slice []string){
 	}
 }
 func(config*CrawlerConfig) SetUrls(substrOfParams string ){
-	start:=0
-	for i:=0;i<len(substrOfParams);i++{
-		if(substrOfParams[i]==','){
-			config.urls=append(config.urls, NewUrl(substrOfParams[start:i]))
-			start=i+1
-		}
+	for _,v:=range strings.Split(substrOfParams,","){
+		config.urls=append(config.urls, NewUrl(strings.TrimSpace(v)))
 	}
-	config.urls=append(config.urls,NewUrl(substrOfParams[start:]))
-	
 }
 func(config*CrawlerConfig) SetDepth(depth int ){
 	config.depth=depth
