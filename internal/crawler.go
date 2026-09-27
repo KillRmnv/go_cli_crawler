@@ -128,35 +128,34 @@ func (crawler* CliCrawler) crawleInside(depth int,ctx context.Context,url Url, r
 	if len(page)==0{
 		return
 	}
-	resourceNode:=crawler.parsePage(&page,domain)
+	resourceNode,hrefsToCrawl:=crawler.parsePage(&page,domain,url.adress)
 	pageUrl:=resourceNode.Resourse
-	links:=append([]ResourseNode(nil),resourceNode.Links...) 
 	resourseChans:=make(chan ResourseNode,crawler.amountOfGorutines)
 	var wg sync.WaitGroup
 
 	go func() {
 		defer close(resourseChans)
-		for _,v:=range links{
+		for _,href:=range hrefsToCrawl{
 			if(ctx.Err()!=nil){
 				break
 			}
 			if(depth+1>crawler.config.depth){
 				continue
 			}
-			if(!crawler.visited.Add(v.Resourse)){
-				crawler.crawlerLogger.Println("["+pageUrl+"]"+"Found already visited link "+v.Resourse)
+			if(!crawler.visited.Add(href)){
+				crawler.crawlerLogger.Println("["+pageUrl+"]"+"Found already visited link "+href)
 				continue
 			}
-			crawler.crawlerLogger.Println("["+pageUrl+"]"+"Crawling to "+v.Resourse)
+			crawler.crawlerLogger.Println("["+pageUrl+"]"+"Crawling to "+href)
 			wg.Add(1)
 			if(crawler.atomicCounter.Load()<int32(crawler.amountOfGorutines)){
 				crawler.atomicCounter.Add(1)
 				go func(u Url){
 					defer crawler.atomicCounter.Add(-1)
 					crawler.crawleInside(depth,ctx,u,resourseChans,&wg,domain)
-				}(NewUrl(v.Resourse))
+				}(NewUrl(href))
 			}else{
-				crawler.crawleInside(depth,ctx,NewUrl(v.Resourse),resourseChans,&wg,domain)
+				crawler.crawleInside(depth,ctx,NewUrl(href),resourseChans,&wg,domain)
 			}
 		}
 		wg.Wait()
@@ -186,26 +185,30 @@ func sendNode(resources chan ResourseNode, node ResourseNode, ctx context.Contex
 	}
 }
 
-func ( crawler* CliCrawler) parsePage(page* string,domainUrl* string) ResourseNode{
+func ( crawler* CliCrawler) parsePage(page* string,domainUrl* string,url string) (ResourseNode,[]string){
 	var resorce ResourseNode
 	reTitle:=regexp.MustCompile("<title>.*</title>")
 	title:=reTitle.FindString(*page)
 	if len(title)>0{
 		resorce.Title=title[7:len(title)-8]
 	}
-	resorce.Resourse=*domainUrl
+	resorce.Resourse=url
 	reHref := regexp.MustCompile(`href=[\"']([^\"']+)[\"']`)
 	hrefs:=reHref.FindAll([]byte(*page),-1)
 	crawler.crawlerLogger.Println("Found links on page "+resorce.Title+":"+strconv.Itoa(len(hrefs)))
+	var hrefsToCrawl []string
 	var links []ResourseNode
 	for _,href:= range hrefs{
 		hrefParsed:=href[6 : len(href)-1]
 		if strings.Contains(string(hrefParsed),*domainUrl){
-			links=append(links, ResourseNode{Resourse: string(hrefParsed)})
+			hrefsToCrawl=append(hrefsToCrawl,string(hrefParsed))
+			if(crawler.config.stubs){
+				links=append(links, ResourseNode{Resourse: string(hrefParsed)})
+			}
 		}
 	}
 	resorce.Links=links
-	return resorce
+	return resorce,hrefsToCrawl
 }
 
 func ( crawler* CliCrawler) extractUrlDomain() ([]Url,[]string){

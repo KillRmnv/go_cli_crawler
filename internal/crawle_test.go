@@ -89,7 +89,8 @@ func TestCliCrawler_ParsePage(t *testing.T) {
 	`
 	domainUrl := "example.com"
 
-	result := crawler.parsePage(&htmlPage, &domainUrl)
+	crawler.config.stubs = true
+	result, hrefsToCrawl := crawler.parsePage(&htmlPage, &domainUrl,domainUrl)
 
 	expectedTitle := "Test title"
 	if result.Title != expectedTitle {
@@ -97,6 +98,9 @@ func TestCliCrawler_ParsePage(t *testing.T) {
 	}
 	if result.Resourse != domainUrl {
 		t.Errorf("Expected resource %q, recieved %q", domainUrl, result.Resourse)
+	}
+	if len(hrefsToCrawl) != 2 {
+		t.Errorf("crawl list must hold both domain links regardless of stubs flag, got %d", len(hrefsToCrawl))
 	}
 
 	var parsedLinks []string
@@ -118,6 +122,32 @@ func TestCliCrawler_ParsePage(t *testing.T) {
 	}
 	if parsedLinks[0] != expectedLink2 && parsedLinks[1] != expectedLink2 {
 		t.Errorf("link %q are not in result", expectedLink2)
+	}
+}
+
+func TestCliCrawler_ParsePage_StubsFlag(t *testing.T) {
+	crawler := &CliCrawler{}
+	crawler.crawlerLogger = *log.New(io.Discard, "", 0)
+
+	htmlPage := `<title>T</title><a href="https://example.com/page1">a</a><a href="https://other.com/x">b</a>`
+	domainUrl := "example.com"
+
+	crawler.config.stubs = true
+	node, hrefs := crawler.parsePage(&htmlPage, &domainUrl, domainUrl)
+	if len(hrefs) != 1 {
+		t.Errorf("stubs=true: expected 1 crawl link, got %d", len(hrefs))
+	}
+	if len(node.Links) != 1 {
+		t.Errorf("stubs=true: expected 1 stub in links, got %d", len(node.Links))
+	}
+
+	crawler.config.stubs = false
+	node, hrefs = crawler.parsePage(&htmlPage, &domainUrl, domainUrl)
+	if len(hrefs) != 1 {
+		t.Errorf("stubs=false: crawl list must not depend on the flag, got %d", len(hrefs))
+	}
+	if len(node.Links) != 0 {
+		t.Errorf("stubs=false: links must contain no stubs, got %d", len(node.Links))
 	}
 }
 

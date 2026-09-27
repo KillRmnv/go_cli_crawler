@@ -11,6 +11,7 @@ const(
 	LogFilepath="./log/crawler.log"
 	Retry=1
 	Delay=0*time.Second
+	Stubs=false
 )
 type CrawlerConfig struct{
 	urls[] Url
@@ -21,7 +22,11 @@ type CrawlerConfig struct{
 	log string
 	retry int
 	delay time.Duration
+	stubs bool
 	
+}
+func(config*CrawlerConfig) SetStubs( withStubs bool ){
+	config.stubs=withStubs
 }
 func(config*CrawlerConfig) SetDelay( delayTimeout time.Duration ){
 	config.delay=delayTimeout

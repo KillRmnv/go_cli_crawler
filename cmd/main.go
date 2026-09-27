@@ -15,6 +15,7 @@ func main() {
 	logPath := flag.String("log", clicrawler.LogFilepath, "a log filepath")
 	retry:=flag.Int("retry",clicrawler.Retry,"amount of request retries")
 	delay:=flag.Duration("delay",clicrawler.Delay,"time between two requests on the same url")
+	stubs:=flag.Bool("stubs",clicrawler.Stubs,"keep raw link stubs (unfetched hrefs) in result links")
 	
 	flag.Parse() 
 	
@@ -27,6 +28,7 @@ func main() {
 	config.SetLog(*logPath)
 	config.SetRetry(*retry)
 	config.SetDelay(*delay)
+	config.SetStubs(*stubs)
 	var crawler clicrawler.CliCrawler
 	crawler.Init(&config)
 	crawler.Crawle()
