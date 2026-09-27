@@ -59,7 +59,7 @@ func (crawler* CliCrawler) Init(config* CrawlerConfig){
 }
 
 func (crawler* CliCrawler) Crawle() ([]byte,error){
-	result:=make([]ResourseNode,10)
+	var result []ResourseNode
 	ctx, cancel := context.WithTimeout(context.Background(), crawler.config.timeout)
 	var wg sync.WaitGroup
 	defer cancel()
@@ -153,16 +153,17 @@ func ( crawler* CliCrawler) parsePage(page* string,domainUrl* string) ResourseNo
 	reHref := regexp.MustCompile(`href=[\"']([^\"']+)[\"']`)
 	hrefs:=reHref.FindAll([]byte(*page),-1)
 	crawler.crawlerLogger.Println(2,"Found links on page "+resorce.Resourse+":"+strconv.Itoa(len(hrefs)))
-	resorce.Links=make([]ResourseNode,len(hrefs))
-	for i,href:= range hrefs{
+	var links []ResourseNode
+	for _,href:= range hrefs{
 		crawler.crawlerLogger.Println(2,resorce.Resourse+":"+string(href))
 		hrefParsed:=href[6 : len(href)-1]
 		if strings.Contains(string(hrefParsed),*domainUrl){
-			resorce.Links[i].Resourse= string(hrefParsed)
+			links=append(links, ResourseNode{Resourse: string(hrefParsed)})
 		}else{
 			crawler.crawlerLogger.Println("Href of not parent domain:"+string(href)+" Parent domain:"+*domainUrl)
 		}
 	}
+	resorce.Links=links
 	return resorce
 }
 
