@@ -73,6 +73,7 @@ func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliC
 							}
 					}
 					defer resp.Body.Close()
+					crawler.visited.Add(url)
 					contentType := resp.Header.Get("Content-Type")
 					if !strings.Contains(contentType, "text/html") {
 					    crawler.crawlerLogger.Println("Skip non HTML resource:"+url+ " Тип:"+ contentType)
@@ -83,7 +84,7 @@ func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliC
 					if(err!=nil){
 						crawler.crawlerLogger.Println("Error while reading body:"+err.Error())
 					}
-					crawler.visited.Add(url)
+				
 					return string(body)
 				}else{
 					crawler.crawlerLogger.Println("Can not reach resource:"+url)
