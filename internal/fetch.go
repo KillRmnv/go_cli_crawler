@@ -62,7 +62,10 @@ func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliC
 					if(retryAmount<crawler.config.retry){
 						isHtml,isContinue:=client.processHeader(ctx,url,crawler,&retryAmount)
 						crawler.visited.Add(url)
-						if !isHtml||!isContinue{
+						if isContinue{
+							continue
+						}
+						if !isHtml {
 							return ""
 						}
 						isOkFormat=true
