@@ -13,7 +13,7 @@ const(
 	Delay=0*time.Second
 )
 type CrawlerConfig struct{
-	urls[] string
+	urls[] Url
 	depth int
 	timeout time.Duration
 	requestTimeout time.Duration
@@ -31,18 +31,18 @@ func(config*CrawlerConfig) SetRetry(amount int ){
 }
 func (config*CrawlerConfig) SetUrlsSlice(slice []string){
 	for _,v:=range slice{
-		config.urls=append(config.urls, v)
+		config.urls=append(config.urls, NewUrl(v))
 	}
 }
 func(config*CrawlerConfig) SetUrls(substrOfParams string ){
 	start:=0
 	for i:=0;i<len(substrOfParams);i++{
 		if(substrOfParams[i]==','){
-			config.urls=append(config.urls, substrOfParams[start:i])
+			config.urls=append(config.urls, NewUrl(substrOfParams[start:i]))
 			start=i+1
 		}
 	}
-	config.urls=append(config.urls,substrOfParams[start:])
+	config.urls=append(config.urls,NewUrl(substrOfParams[start:]))
 	
 }
 func(config*CrawlerConfig) SetDepth(depth int ){
