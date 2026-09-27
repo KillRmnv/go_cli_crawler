@@ -50,11 +50,11 @@ func (crawler* CliCrawler) createFile(filePath string) *os.File{
 
 func (crawler* CliCrawler) Init(config* CrawlerConfig){
 	crawler.crawlerLogger=*log.New(crawler.createFile(config.log), "[CRAWLER] ", log.Lshortfile)
-	crawler.createFile(config.output)
+	crawler.config.output= crawler.createFile(config.output).Name()
 	crawler.visited=mapset.NewSet[string]()
 	crawler.fetchClient.Init(config)
 	crawler.atomicCounter.Store(0)
-	crawler.amountOfGorutines=runtime.NumCPU()*3
+	crawler.amountOfGorutines=runtime.NumCPU()*2
 	crawler.config=*config
 }
 
@@ -67,13 +67,20 @@ func (crawler* CliCrawler) Crawle() ([]byte,error){
 	resourseChans:=make(chan ResourseNode,10)
 	for i:=0;i<len(crawler.config.urls);i++ {
 		wg.Add(1)
-		domain:=crawler.config.urls[i].ExtractDomain()
-		if(crawler.atomicCounter.Load()<int32(crawler.amountOfGorutines)){
-			crawler.atomicCounter.Add(1)
-			go	crawler.crawleInside(0,ctx,crawler.config.urls[i],resourseChans,&wg,&domain)
+		domain,err:=crawler.config.urls[i].ExtractDomain()
+		if(err!=nil){
+			crawler.crawlerLogger.Println("Invalid domain:"+crawler.config.urls[i].adress)
+			crawler.config.urls=append(crawler.config.urls[:i],crawler.config.urls[i+1:]...)
 		}else{
-			crawler.crawlerLogger.Println("Reach gorutines limit:"+crawler.config.urls[i].adress)
-			crawler.crawleInside(0,ctx,crawler.config.urls[i],resourseChans,&wg,&domain)
+			crawler.crawlerLogger.Printf("Extracted domain:%v for %v\n",domain,crawler.config.urls[i])
+			
+			if(crawler.atomicCounter.Load()<int32(crawler.amountOfGorutines)){
+				crawler.atomicCounter.Add(1)
+				go	crawler.crawleInside(0,ctx,crawler.config.urls[i],resourseChans,&wg,&domain)
+			}else{
+				crawler.crawlerLogger.Println("Reach gorutines limit:"+crawler.config.urls[i].adress)
+				crawler.crawleInside(0,ctx,crawler.config.urls[i],resourseChans,&wg,&domain)
+			}
 		}
 	}
 	go func() {
@@ -84,10 +91,16 @@ func (crawler* CliCrawler) Crawle() ([]byte,error){
 	loop:
 	for{
 		select{
-			case resource:=<-resourseChans:
+			case resource,ok:=<-resourseChans:
+				if!ok{
+					break loop
+				}
 		 		result= append(result , resource)
 			case <-ctx.Done():
-				break loop
+			for resource:=range resourseChans{
+				result= append(result , resource)
+			}
+			break loop
 		}	
 	}
 	json,err:=json.Marshal(result)
@@ -100,6 +113,7 @@ func (crawler* CliCrawler) Crawle() ([]byte,error){
 // depth должна копироваться, ctx интерфейс, поэтому по дефолту ссылка
 func (crawler* CliCrawler) crawleInside(depth int,ctx context.Context,url Url, resources chan ResourseNode,wgParent* sync.WaitGroup,domain*string) { 
 	defer wgParent.Done()
+	defer crawler.atomicCounter.Add(-1)
 	depth++
 	if(depth>crawler.config.depth){
 		crawler.crawlerLogger.Println("Max depth reached:"+strconv.Itoa(depth))
@@ -135,9 +149,15 @@ func (crawler* CliCrawler) crawleInside(depth int,ctx context.Context,url Url, r
 	loop:
 	for{
 		select{
-			case resource:=<-resourseChans:
+			case resource,ok:=<-resourseChans:
+				if !ok{
+					break loop
+				}
 				resourceNode.Links = append(resourceNode.Links , resource)
 			case <-ctx.Done():
+				for resource:= range resourseChans{
+					 resourceNode.Links = append(resourceNode.Links, resource)
+				}
 				break loop
 		}	
 	}
@@ -149,13 +169,14 @@ func ( crawler* CliCrawler) parsePage(page* string,domainUrl* string) ResourseNo
 	var resorce ResourseNode
 	reTitle:=regexp.MustCompile("<title>.*</title>")
 	title:=reTitle.FindString(*page)
-	resorce.Resourse=title[7:len(title)-8]
+	resorce.Title=title[7:len(title)-8]
+	resorce.Resourse=*domainUrl
 	reHref := regexp.MustCompile(`href=[\"']([^\"']+)[\"']`)
 	hrefs:=reHref.FindAll([]byte(*page),-1)
-	crawler.crawlerLogger.Println(2,"Found links on page "+resorce.Resourse+":"+strconv.Itoa(len(hrefs)))
+	crawler.crawlerLogger.Println(2,"Found links on page "+resorce.Title+":"+strconv.Itoa(len(hrefs)))
 	var links []ResourseNode
 	for _,href:= range hrefs{
-		crawler.crawlerLogger.Println(2,resorce.Resourse+":"+string(href))
+		crawler.crawlerLogger.Println(2,resorce.Title+":"+string(href))
 		hrefParsed:=href[6 : len(href)-1]
 		if strings.Contains(string(hrefParsed),*domainUrl){
 			links=append(links, ResourseNode{Resourse: string(hrefParsed)})
