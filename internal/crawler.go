@@ -2,15 +2,11 @@ package clicrawler
 
 import (
 	"context"
-	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,6 +14,7 @@ import (
 	"time"
 	"github.com/deckarep/golang-set/v2"
 )
+
 type CliCrawler struct{
 	config CrawlerConfig // только чтение, поэтому также безопасен
 	visited mapset.Set[string] // потокобезопасная реализация множества
@@ -25,6 +22,8 @@ type CliCrawler struct{
 	fetchClient FetchClient // потокоьезопасен
 	atomicCounter atomic.Int32
 	amountOfGorutines int // потокобезопасно: инициализируется и читается
+	parser Parser
+	storage Storage
 }
 
 func (crawler* CliCrawler) createFile(filePath string) *os.File{
@@ -52,8 +51,9 @@ func (crawler* CliCrawler) createFile(filePath string) *os.File{
 }
 
 func (crawler* CliCrawler) Init(config* CrawlerConfig){
-	crawler.config=*config 
-	crawler.crawlerLogger=*log.New(crawler.createFile(crawler.config.log), "[CRAWLER] ", log.LstdFlags|log.Lshortfile)
+	crawler.config=*config
+	logFile:= crawler.createFile(crawler.config.log)
+	crawler.crawlerLogger=*log.New(logFile, "[CRAWLER] ", log.LstdFlags|log.Lshortfile)
 	outFile:=crawler.createFile(crawler.config.output) 
 	crawler.config.SetOutput(outFile.Name())
 	outFile.Close()
@@ -61,6 +61,8 @@ func (crawler* CliCrawler) Init(config* CrawlerConfig){
 	crawler.fetchClient.Init(config)
 	crawler.atomicCounter.Store(0)
 	crawler.amountOfGorutines=runtime.NumCPU()*2
+	crawler.parser=&StandardHTMLParser{logger: *log.New(logFile, "[PARSER] ", log.LstdFlags|log.Lshortfile),iterateStubs: config.stubs}
+	crawler.storage=&JSONStorage{filepath: crawler.config.output,logger:*log.New(logFile, "[STORAGE] ", log.LstdFlags|log.Lshortfile) }
 }
 
 func (crawler* CliCrawler) Crawle() ([]byte,error){
@@ -74,9 +76,10 @@ func (crawler* CliCrawler) Crawle() ([]byte,error){
 		<-ctx.Done()
 		stop() 
 	}()
-	links,domains:=crawler.extractUrlDomain()
+	links,domains:=crawler.extractUrlsDomains()
 	resourseChans:=make(chan ResourseNode,crawler.amountOfGorutines)
 	var wg sync.WaitGroup
+	
 	go func() {
 		defer close(resourseChans)
 		for i:=0;i<len(links);i++ {
@@ -104,23 +107,12 @@ func (crawler* CliCrawler) Crawle() ([]byte,error){
 	for resource:=range resourseChans{
 		result=append(result,resource)
 	}
-
-	data,err:=json.Marshal(result,jsontext.AllowInvalidUTF8(true))
-	if err!=nil{
-		crawler.crawlerLogger.Println("Error occured while serializing:"+err.Error())
-		return nil,err
-	}
-	crawler.crawlerLogger.Println("Saving to file "+crawler.config.output)
-	if err:=os.WriteFile(crawler.config.output,data,0644); err!=nil{
-		crawler.crawlerLogger.Println("Can not write result to "+crawler.config.output+":"+err.Error())
-		return nil,err
-	}
-	return data,nil
+	return crawler.storage.Save(result)
 }
+
 // depth должна копироваться, ctx интерфейс, поэтому по дефолту ссылка
 func (crawler* CliCrawler) crawleInside(depth int,ctx context.Context,url Url, resources chan ResourseNode,wgParent* sync.WaitGroup,domain*string) { 
 	defer wgParent.Done()
-	depth++
 	if(depth>crawler.config.depth){
 		return
 	}
@@ -128,7 +120,7 @@ func (crawler* CliCrawler) crawleInside(depth int,ctx context.Context,url Url, r
 	if len(page)==0{
 		return
 	}
-	resourceNode,hrefsToCrawl:=crawler.parsePage(&page,domain,url.adress)
+	resourceNode,hrefsToCrawl:=crawler.parser.ParsePage(&page,domain,&url.adress)
 	pageUrl:=resourceNode.Resourse
 	resourseChans:=make(chan ResourseNode,crawler.amountOfGorutines)
 	var wg sync.WaitGroup
@@ -138,9 +130,6 @@ func (crawler* CliCrawler) crawleInside(depth int,ctx context.Context,url Url, r
 		for _,href:=range hrefsToCrawl{
 			if(ctx.Err()!=nil){
 				break
-			}
-			if(depth+1>crawler.config.depth){
-				continue
 			}
 			if(!crawler.visited.Add(href)){
 				crawler.crawlerLogger.Println("["+pageUrl+"]"+"Found already visited link "+href)
@@ -152,10 +141,10 @@ func (crawler* CliCrawler) crawleInside(depth int,ctx context.Context,url Url, r
 				crawler.atomicCounter.Add(1)
 				go func(u Url){
 					defer crawler.atomicCounter.Add(-1)
-					crawler.crawleInside(depth,ctx,u,resourseChans,&wg,domain)
+					crawler.crawleInside(depth+1,ctx,u,resourseChans,&wg,domain)
 				}(NewUrl(href))
 			}else{
-				crawler.crawleInside(depth,ctx,NewUrl(href),resourseChans,&wg,domain)
+				crawler.crawleInside(depth+1,ctx,NewUrl(href),resourseChans,&wg,domain)
 			}
 		}
 		wg.Wait()
@@ -166,12 +155,12 @@ func (crawler* CliCrawler) crawleInside(depth int,ctx context.Context,url Url, r
 		resourceNode.Links=append(resourceNode.Links,resource)
 	}
 
-	if !sendNode(resources,resourceNode,ctx){
+	if !crawler.sendNode(resources,resourceNode,ctx){
 		crawler.crawlerLogger.Println("Node dropped on cancel: "+url.adress)
 	}
 }
 
-func sendNode(resources chan ResourseNode, node ResourseNode, ctx context.Context) bool{
+func (crawler* CliCrawler) sendNode(resources chan ResourseNode, node ResourseNode, ctx context.Context) bool{
 	select{
 		case resources<-node:
 			return true
@@ -185,33 +174,7 @@ func sendNode(resources chan ResourseNode, node ResourseNode, ctx context.Contex
 	}
 }
 
-func ( crawler* CliCrawler) parsePage(page* string,domainUrl* string,url string) (ResourseNode,[]string){
-	var resorce ResourseNode
-	reTitle:=regexp.MustCompile("<title>.*</title>")
-	title:=reTitle.FindString(*page)
-	if len(title)>0{
-		resorce.Title=title[7:len(title)-8]
-	}
-	resorce.Resourse=url
-	reHref := regexp.MustCompile(`(?i)(?:^|[^a-z0-9_-])href\s*=\s*["']([^"']+)["']`)
-	hrefs:=reHref.FindAllStringSubmatch(*page,-1)
-	crawler.crawlerLogger.Println("Found links on page "+resorce.Title+":"+strconv.Itoa(len(hrefs)))
-	var hrefsToCrawl []string
-	var links []ResourseNode
-	for _,href:= range hrefs{
-		hrefParsed:=href[1]
-		if strings.Contains(hrefParsed,*domainUrl){
-			hrefsToCrawl=append(hrefsToCrawl,hrefParsed)
-			if(crawler.config.stubs){
-				links=append(links, ResourseNode{Resourse: hrefParsed})
-			}
-		}
-	}
-	resorce.Links=links
-	return resorce,hrefsToCrawl
-}
-
-func ( crawler* CliCrawler) extractUrlDomain() ([]Url,[]string){
+func (crawler* CliCrawler) extractUrlsDomains() ([]Url,[]string){
 	var links []Url
 	var domains []string
 	for _,u := range crawler.config.urls{
