@@ -2,6 +2,7 @@ package clicrawler
 
 import (
 	"context"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -93,6 +94,95 @@ func TestCliCrawler_Crawle_CancelContext(t *testing.T) {
 	if err != nil {
 		t.Errorf("Timeout unwind must stay graceful, recieved: %v", err)
 	}
+}
+
+func TestCliCrawler_ExtractUrlsDomains(t *testing.T) {
+	tempDir := t.TempDir()
+	config := &CrawlerConfig{}
+	config.SetLog(filepath.Join(tempDir, "log.txt"))
+	config.SetOutput(filepath.Join(tempDir, "out.json"))
+	config.SetUrls("https://a.com, not-a-url, https://b.com/path")
+
+	crawler := &CliCrawler{}
+	crawler.Init(config)
+
+	links, domains := crawler.extractUrlsDomains()
+	if len(links) != 2 {
+		t.Fatalf("expected 2 valid urls, recieved %d", len(links))
+	}
+	if domains[0] != "a.com" || domains[1] != "b.com" {
+		t.Errorf("unexpected domains: %v", domains)
+	}
+}
+
+func TestCliCrawler_Crawle_DepthLimit(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/a", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<html><head><title>Page A</title></head><body><a href="/b">to b</a></body></html>`))
+	})
+	mux.HandleFunc("/b", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<html><head><title>Page B</title></head><body></body></html>`))
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	crawlSeed := func(t *testing.T, depth int) []ResourseNode {
+		t.Helper()
+		tempDir := t.TempDir()
+		config := &CrawlerConfig{}
+		config.SetLog(filepath.Join(tempDir, "log.txt"))
+		config.SetOutput(filepath.Join(tempDir, "out.json"))
+		config.SetTimeout(20 * time.Second)
+		config.SetRequestTimeout(5 * time.Second)
+		config.SetRetry(1)
+		config.SetUrlsSlice([]string{server.URL + "/a"})
+		config.SetDepth(depth)
+
+		crawler := &CliCrawler{}
+		crawler.Init(config)
+
+		data, err := crawler.Crawle()
+		if err != nil {
+			t.Fatalf("unexpected crawle error: %v", err)
+		}
+		var nodes []ResourseNode
+		if err := json.Unmarshal(data, &nodes); err != nil {
+			t.Fatalf("result is not valid JSON: %v", err)
+		}
+		return nodes
+	}
+
+	t.Run("Depth zero fetches seeds only", func(t *testing.T) {
+		nodes := crawlSeed(t, 0)
+		if len(nodes) != 1 {
+			t.Fatalf("expected 1 root, recieved %d", len(nodes))
+		}
+		if nodes[0].Title != "Page A" {
+			t.Errorf("expected title %q, recieved %q", "Page A", nodes[0].Title)
+		}
+		if len(nodes[0].Links) != 0 {
+			t.Errorf("depth 0 must not fetch children, recieved %d links", len(nodes[0].Links))
+		}
+	})
+
+	t.Run("Depth one fetches children", func(t *testing.T) {
+		nodes := crawlSeed(t, 1)
+		if len(nodes) != 1 {
+			t.Fatalf("expected 1 root, recieved %d", len(nodes))
+		}
+		if len(nodes[0].Links) != 1 {
+			t.Fatalf("expected 1 child, recieved %d", len(nodes[0].Links))
+		}
+		child := nodes[0].Links[0]
+		if child.Title != "Page B" {
+			t.Errorf("expected child title %q, recieved %q", "Page B", child.Title)
+		}
+		if !strings.HasSuffix(child.Resourse, "/b") {
+			t.Errorf("expected child resource ending with /b, recieved %q", child.Resourse)
+		}
+	})
 }
 
 func TestCliCrawler_Crawle_NoValidUrls(t *testing.T) {
