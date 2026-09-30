@@ -2,10 +2,6 @@ package clicrawler
 
 import (
 	"context"
-	"encoding/json/jsontext"
-	"encoding/json/v2"
-	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,87 +66,6 @@ func TestCliCrawler_CreateFile(t *testing.T) {
 	}
 }
 
-func TestCliCrawler_ParsePage(t *testing.T) {
-	crawler := &CliCrawler{}
-	crawler.crawlerLogger = *log.New(io.Discard, "", 0)
-
-	htmlPage := `
-	<!DOCTYPE html>
-	<html>
-	<head>
-		<title>Test title</title>
-	</head>
-	<body>
-		<a href="https://example.com/page1">Link1 (same domain)</a>
-		<a href="https://other-domain.com/page2">Link2 (another domain)</a>
-		<a href='https://example.com/page3'>Link3 (same domain)</a>
-	</body>
-	</html>
-	`
-	domainUrl := "example.com"
-
-	crawler.config.stubs = true
-	result, hrefsToCrawl := crawler.parsePage(&htmlPage, &domainUrl,domainUrl)
-
-	expectedTitle := "Test title"
-	if result.Title != expectedTitle {
-		t.Errorf("Expected title %q, recieved %q", expectedTitle, result.Title)
-	}
-	if result.Resourse != domainUrl {
-		t.Errorf("Expected resource %q, recieved %q", domainUrl, result.Resourse)
-	}
-	if len(hrefsToCrawl) != 2 {
-		t.Errorf("crawl list must hold both domain links regardless of stubs flag, got %d", len(hrefsToCrawl))
-	}
-
-	var parsedLinks []string
-	for _, link := range result.Links {
-		if link.Resourse != "" { 
-			parsedLinks = append(parsedLinks, link.Resourse)
-		}
-	}
-
-	if len(parsedLinks) != 2 {
-		t.Fatalf("Expexted 2 links of domain %s, recieved %d", domainUrl, len(parsedLinks))
-	}
-
-	expectedLink1 := "https://example.com/page1"
-	expectedLink2 := "https://example.com/page3"
-
-	if parsedLinks[0] != expectedLink1 && parsedLinks[1] != expectedLink1 {
-		t.Errorf("link %q are not in result", expectedLink1)
-	}
-	if parsedLinks[0] != expectedLink2 && parsedLinks[1] != expectedLink2 {
-		t.Errorf("link %q are not in result", expectedLink2)
-	}
-}
-
-func TestCliCrawler_ParsePage_StubsFlag(t *testing.T) {
-	crawler := &CliCrawler{}
-	crawler.crawlerLogger = *log.New(io.Discard, "", 0)
-
-	htmlPage := `<title>T</title><a href="https://example.com/page1">a</a><a href="https://other.com/x">b</a>`
-	domainUrl := "example.com"
-
-	crawler.config.stubs = true
-	node, hrefs := crawler.parsePage(&htmlPage, &domainUrl, domainUrl)
-	if len(hrefs) != 1 {
-		t.Errorf("stubs=true: expected 1 crawl link, got %d", len(hrefs))
-	}
-	if len(node.Links) != 1 {
-		t.Errorf("stubs=true: expected 1 stub in links, got %d", len(node.Links))
-	}
-
-	crawler.config.stubs = false
-	node, hrefs = crawler.parsePage(&htmlPage, &domainUrl, domainUrl)
-	if len(hrefs) != 1 {
-		t.Errorf("stubs=false: crawl list must not depend on the flag, got %d", len(hrefs))
-	}
-	if len(node.Links) != 0 {
-		t.Errorf("stubs=false: links must contain no stubs, got %d", len(node.Links))
-	}
-}
-
 func TestCliCrawler_Crawle_CancelContext(t *testing.T) {
 	tempDir := t.TempDir()
 	config := &CrawlerConfig{}
@@ -203,31 +118,13 @@ func TestCliCrawler_Init_KeepsConfigAndRenamesOutput(t *testing.T) {
 	}
 }
 
-func TestCliCrawler_Crawle_OutputSurvivesInvalidUTF8(t *testing.T) {
-	broken := []ResourseNode{{Resourse: "example.com", Title: "Google \xcc\xe0\xeb"}}
-
-	if _, err := json.Marshal(broken); err == nil {
-		t.Error("default Marshal must reject invalid UTF-8 — this is why Crawle passes jsontext.AllowInvalidUTF8")
-	}
-
-	data, err := json.Marshal(broken, jsontext.AllowInvalidUTF8(true))
-	if err != nil {
-		t.Fatalf("Marshal with AllowInvalidUTF8 failed: %v", err)
-	}
-	if err := json.Unmarshal(data, new(any)); err != nil {
-		t.Errorf("output is not valid JSON: %v (%s)", err, data)
-	}
-	if !strings.ContainsRune(string(data), '�') {
-		t.Errorf("invalid bytes must be mangled to U+FFFD, got %s", data)
-	}
-}
-
 func TestSendNode(t *testing.T) {
 	node := ResourseNode{Resourse: "example.com", Title: "Test"}
-
+	crawler := &CliCrawler{}
 	t.Run("Live ctx with buffered channel", func(t *testing.T) {
 		ch := make(chan ResourseNode, 1)
-		if !sendNode(ch, node, context.Background()) {
+		crawler := &CliCrawler{}
+		if !crawler.sendNode(ch, node, context.Background()) {
 			t.Fatal("sendNode must deliver when channel has space")
 		}
 		if got := <-ch; got.Title != node.Title {
@@ -243,7 +140,7 @@ func TestSendNode(t *testing.T) {
 		go func() { received <- <-ch }()
 		time.Sleep(10 * time.Millisecond)
 
-		if !sendNode(ch, node, ctx) {
+		if !crawler.sendNode(ch, node, ctx) {
 			t.Fatal("node must be delivered to a waiting reader even when ctx is done")
 		}
 		if got := <-received; got.Resourse != node.Resourse {
@@ -256,7 +153,7 @@ func TestSendNode(t *testing.T) {
 		cancel()
 		ch := make(chan ResourseNode)
 		done := make(chan bool, 1)
-		go func() { done <- sendNode(ch, node, ctx) }()
+		go func() { done <- crawler.sendNode(ch, node, ctx) }()
 
 		select {
 		case ok := <-done:

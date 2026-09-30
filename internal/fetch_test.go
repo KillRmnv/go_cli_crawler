@@ -2,11 +2,15 @@ package clicrawler
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestExtractErrStatusLogFilepath(t *testing.T) {
@@ -33,103 +37,118 @@ func TestExtractErrStatusLogFilepath(t *testing.T) {
 	}
 }
 
-func TestFetchPage(t *testing.T){
+func TestFetchPage(t *testing.T) {
 	tempDir := t.TempDir()
 	logFile := filepath.Join(tempDir, "log_test", "crawler.log")
 	outFile := filepath.Join(tempDir, "out_test", "result.json")
+	
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/image") {
+			w.Header().Set("Content-Type", "image/jpeg")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		
+		if strings.Contains(r.URL.Path, "/delay") {
+			time.Sleep(100 * time.Millisecond)
+		}
 
-	client := &FetchClient{}
-	ctx,cancel:=context.WithCancel(context.Background())
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`<html><body><h1>Mock Page</h1><p>This string is deliberately made longer than 100 characters to pass the length check in the positive fetch test. Here is some padding text to make it longer.</p></body></html>`))
+	}))
+	defer mockServer.Close()
+
+	var mockUrls []string
+	for i := 0; i < 15; i++ {
+		mockUrls = append(mockUrls, fmt.Sprintf("%s/delay/%d", mockServer.URL, i))
+	}
+
 	var crawler CliCrawler
 	var config CrawlerConfig
-	config.SetDelay(Delay)
-	config.SetDepth(Depth)
+	config.SetDelay(0)
+	config.SetDepth(1)
 	config.SetLog(logFile)
 	config.SetOutput(outFile)
-	config.SetRequestTimeout(RequestTimeout)
+	config.SetRequestTimeout(5 * time.Second)
 	config.SetRetry(3)
-	config.SetTimeout(Timeout)
-	config.SetUrlsSlice([]string{
-    
-    "https://example.com",
-    "https://example.org",
-    "https://example.net",
-    "https://go.dev",
-    "https://pkg.go.dev",
-    "https://en.wikipedia.org/wiki/Go_(programming_language)",
-    "https://en.wikipedia.org/wiki/Concurrency_(computer_science)",
-    "https://www.w3.org/",
-    "https://developer.mozilla.org/en-US/",
-    "https://github.com",
-	
-    "https://httpbin.org/delay/2",
-    "https://httpbin.org/delay/2?req=1",
-    "https://httpbin.org/delay/2?req=2",
-    
-    "https://httpbin.org/html", 
-    "https://httpbin.org/xml",  
-	})
+	config.SetTimeout(10 * time.Second)
+	config.SetUrlsSlice(mockUrls) 
+
 	crawler.Init(&config)
+	
+	client := &FetchClient{}
 	client.Init(&config)
+
 	t.Run("Positive fetch", func(t *testing.T) {
-		result := client.FetchPage(ctx,"https://google.com",&crawler)
-		if len(result)<100 {
-			t.Error("Does not get response:"+ result)
-			
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		result := client.FetchPage(ctx, mockServer.URL+"/index", &crawler)
+		if len(result) < 100 {
+			t.Error("Does not get response: " + result)
 		}
 	})
+
 	t.Run("File fetch", func(t *testing.T) {
-		result := client.FetchPage(ctx,"https://miro.medium.com/v2/resize:fit:720/format:webp/1*Xj9o_nJ7GJalHI60HtK3Kg.jpeg",&crawler)
-		if len(result)>0 {
-			t.Error("Expected empty string, but returned:"+ result)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		result := client.FetchPage(ctx, mockServer.URL+"/image.jpg", &crawler)
+		if len(result) > 0 {
+			t.Error("Expected empty string, but returned: " + result)
 		}
 	})
 
-	
 	t.Run("Gracefull shoutdown test", func(t *testing.T) {
-		var wg sync.WaitGroup 
-		
-	    for i := 0; i < len(config.urls); i++ {
-	        wg.Add(1) 
-	        
-	        go func(url string) {
-	            defer wg.Done() 
-	            client.FetchPage(ctx, url, &crawler)    
-	        }(config.urls[i].adress)
-	        
-	        if i == len(config.urls)-2 {
-	            cancel()
-	        }
-	    }
-			
-	    wg.Wait()
-		file,_:=os.ReadFile(config.log)
-		if(!strings.Contains(string(file),"Gracefully stopping waiting")&&!strings.Contains(string(file),"Gracefully stopping fetching")){
-			t.Error("Log file does not contain grscefull shoutdown log:"+ string(file))
-		}
-	})
-	t.Run("Semaphore test", func(t *testing.T) {
-		var wg sync.WaitGroup 
-		
-	    for i := 0; i < len(config.urls); i++ {
-	        wg.Add(1) 
-	        
-	        go func(url string) {
-	            defer wg.Done() 
-	            client.FetchPage(ctx, url, &crawler)    
-	        }(config.urls[i].adress)
-	        
-	        if i == len(config.urls)-2 {
-	            cancel()
-	        }
-	    }
-			
-	    wg.Wait()
-		file,_:=os.ReadFile(config.log)
-		if(!strings.Contains(string(file),"Gracefully stopping fetching (in queue)")){
-			t.Error("Log file does not contain semaphore shoutdown log:"+ string(file))
-		}
-	})
-	
-}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 
+		var wg sync.WaitGroup
+
+		for i := 0; i < len(config.urls); i++ {
+			wg.Add(1)
+
+			go func(url string) {
+				defer wg.Done()
+				client.FetchPage(ctx, url, &crawler)
+			}(config.urls[i].adress)
+
+			if i == len(config.urls)-2 {
+				cancel()
+			}
+		}
+
+		wg.Wait()
+		file, _ := os.ReadFile(config.log)
+		if !strings.Contains(string(file), "Gracefully stopping waiting") && !strings.Contains(string(file), "Gracefully stopping fetching") {
+			t.Error("Log file does not contain gracefull shutdown log:\n" + string(file))
+		}
+	})
+
+	t.Run("Semaphore test", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		var wg sync.WaitGroup
+
+		for i := 0; i < len(config.urls); i++ {
+			wg.Add(1)
+
+			go func(url string) {
+				defer wg.Done()
+				client.FetchPage(ctx, url, &crawler)
+			}(config.urls[i].adress)
+
+			if i == len(config.urls)-2 {
+				cancel()
+			}
+		}
+
+		wg.Wait()
+		file, _ := os.ReadFile(config.log)
+		if !strings.Contains(string(file), "Gracefully stopping fetching (in queue)") {
+			t.Error("Log file does not contain semaphore shutdown log:\n" + string(file))
+		}
+	})
+}
