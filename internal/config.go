@@ -30,33 +30,58 @@ func(config*CrawlerConfig) SetStubs( withStubs bool ){
 	config.stubs=withStubs
 }
 func(config*CrawlerConfig) SetDelay( delayTimeout time.Duration ){
+	if delayTimeout<0{
+		delayTimeout=Delay
+	}
 	config.delay=delayTimeout
 }
 func(config*CrawlerConfig) SetRetry(amount int ){
+	if amount<1{
+		amount=Retry
+	}
 	config.retry=amount
 }
 func (config*CrawlerConfig) SetUrlsSlice(slice []string){
 	for _,v:=range slice{
-		config.urls=append(config.urls, NewUrl(v))
+		if trimmed:=strings.TrimSpace(v); trimmed!=""{
+			config.urls=append(config.urls, NewUrl(trimmed))
+		}
 	}
 }
 func(config*CrawlerConfig) SetUrls(substrOfParams string ){
 	for _,v:=range strings.Split(substrOfParams,","){
-		config.urls=append(config.urls, NewUrl(strings.TrimSpace(v)))
+		if trimmed:=strings.TrimSpace(v); trimmed!=""{
+			config.urls=append(config.urls, NewUrl(trimmed))
+		}
 	}
 }
 func(config*CrawlerConfig) SetDepth(depth int ){
+	if depth<0{
+		depth=Depth
+	}
 	config.depth=depth
 }
 func(config*CrawlerConfig) SetTimeout(timeout time.Duration ){
+	if timeout<=0{
+		timeout=Timeout
+	}
 	config.timeout=timeout
 }
 func(config*CrawlerConfig) SetRequestTimeout( requestTimeout time.Duration ){
+	if requestTimeout<=0{
+		requestTimeout=RequestTimeout
+	}
 	config.requestTimeout=requestTimeout
 }
 func(config*CrawlerConfig) SetOutput( outputPath string ){
-	config.output=outputPath
+	if strings.TrimSpace(outputPath)==""{
+		outputPath=OutputFilepath
+	}
+	config.output=strings.TrimSpace(outputPath)
 }
 func(config*CrawlerConfig) SetLog( logPath string ){
-	config.log=logPath
+	if strings.TrimSpace(logPath)==""{
+		logPath=LogFilepath
+	}
+	config.log=strings.TrimSpace(logPath)
 }
