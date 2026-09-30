@@ -3,6 +3,8 @@ package main
 import (
 	"crawler/internal"
 	"flag"
+	"fmt"
+	"os"
 )
 
 func main() {
@@ -31,5 +33,8 @@ func main() {
 	config.SetStubs(*stubs)
 	var crawler clicrawler.CliCrawler
 	crawler.Init(&config)
-	crawler.Crawle()
+	if _,err:=crawler.Crawle(); err!=nil{
+		fmt.Fprintln(os.Stderr,"crawl failed: "+err.Error())
+		os.Exit(1)
+	}
 }

@@ -2,6 +2,8 @@ package clicrawler
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -107,7 +109,19 @@ func (crawler* CliCrawler) Crawle() ([]byte,error){
 	for resource:=range resourseChans{
 		result=append(result,resource)
 	}
-	return crawler.storage.Save(result)
+	data,saveErr:=crawler.storage.Save(result)
+	if saveErr!=nil{
+		return data,saveErr
+	}
+	if len(result)==0{
+		if len(links)==0{
+			return data,errors.New("no valid urls to crawl")
+		}
+		if ctx.Err()==nil{
+			return data,fmt.Errorf("nothing fetched: all %d seed fetches failed",len(links))
+		}
+	}
+	return data,nil
 }
 
 // depth должна копироваться, ctx интерфейс, поэтому по дефолту ссылка
