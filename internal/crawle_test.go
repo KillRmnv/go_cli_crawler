@@ -2,6 +2,8 @@ package clicrawler
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,20 +70,76 @@ func TestCliCrawler_CreateFile(t *testing.T) {
 
 func TestCliCrawler_Crawle_CancelContext(t *testing.T) {
 	tempDir := t.TempDir()
+	slowServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(1 * time.Second)
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<html><head><title>Slow</title></head><body></body></html>`))
+	}))
+	defer slowServer.Close()
 	config := &CrawlerConfig{}
 	config.SetLog(filepath.Join(tempDir, "log.txt"))
 	config.SetOutput(filepath.Join(tempDir, "out.json"))
-	
-	config.SetTimeout(10 * time.Millisecond)
-	config.SetUrlsSlice([]string{"https://example.com"})
+
+	config.SetTimeout(100 * time.Millisecond)
+	config.SetRequestTimeout(5 * time.Second)
+	config.SetRetry(1)
+	config.SetUrlsSlice([]string{slowServer.URL})
 	config.SetDepth(1)
 
 	crawler := &CliCrawler{}
 	crawler.Init(config)
-	
+
 	_, err := crawler.Crawle()
 	if err != nil {
-		t.Errorf("Unexpected timeout error, recieved: %v", err)
+		t.Errorf("Timeout unwind must stay graceful, recieved: %v", err)
+	}
+}
+
+func TestCliCrawler_Crawle_NoValidUrls(t *testing.T) {
+	tempDir := t.TempDir()
+	outFile := filepath.Join(tempDir, "out.json")
+	config := &CrawlerConfig{}
+	config.SetLog(filepath.Join(tempDir, "log.txt"))
+	config.SetOutput(outFile)
+	config.SetTimeout(5 * time.Second)
+	config.SetUrls("not-a-url, ,")
+
+	crawler := &CliCrawler{}
+	crawler.Init(config)
+
+	_, err := crawler.Crawle()
+	if err == nil {
+		t.Fatal("Crawle must fail when no seed url is valid")
+	}
+	data, readErr := os.ReadFile(outFile)
+	if readErr != nil {
+		t.Fatalf("empty result must still be saved: %v", readErr)
+	}
+	if strings.TrimSpace(string(data)) != "[]" {
+		t.Errorf("expected empty array in output, recieved %q", data)
+	}
+}
+
+func TestCliCrawler_Crawle_AllSeedsFail(t *testing.T) {
+	tempDir := t.TempDir()
+	deadServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	deadUrl := deadServer.URL
+	deadServer.Close()
+	config := &CrawlerConfig{}
+	config.SetLog(filepath.Join(tempDir, "log.txt"))
+	config.SetOutput(filepath.Join(tempDir, "out.json"))
+	config.SetTimeout(20 * time.Second)
+	config.SetRequestTimeout(2 * time.Second)
+	config.SetRetry(1)
+	config.SetUrlsSlice([]string{deadUrl})
+	config.SetDepth(1)
+
+	crawler := &CliCrawler{}
+	crawler.Init(config)
+
+	_, err := crawler.Crawle()
+	if err == nil {
+		t.Fatal("Crawle must fail when every seed fetch failed")
 	}
 }
 
