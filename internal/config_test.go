@@ -133,3 +133,82 @@ func TestCrawlerConfig_Setters(t *testing.T) {
 		}
 	})
 }
+
+func TestCrawlerConfig_SettersValidation(t *testing.T) {
+	t.Run("SetRetry zero and negative fall back to default", func(t *testing.T) {
+		for _, v := range []int{0, -3} {
+			config := &CrawlerConfig{}
+			config.SetRetry(v)
+			if config.retry != Retry {
+				t.Errorf("SetRetry(%d): expected default %d, recieved %d", v, Retry, config.retry)
+			}
+		}
+	})
+
+	t.Run("SetDepth negative falls back to default, zero stays", func(t *testing.T) {
+		config := &CrawlerConfig{}
+		config.SetDepth(-5)
+		if config.depth != Depth {
+			t.Errorf("SetDepth(-5): expected default %d, recieved %d", Depth, config.depth)
+		}
+		config.SetDepth(0)
+		if config.depth != 0 {
+			t.Errorf("SetDepth(0): expected 0 (seeds only), recieved %d", config.depth)
+		}
+	})
+
+	t.Run("SetTimeout and SetRequestTimeout non-positive fall back to defaults", func(t *testing.T) {
+		config := &CrawlerConfig{}
+		config.SetTimeout(0)
+		if config.timeout != Timeout {
+			t.Errorf("SetTimeout(0): expected default %v, recieved %v", Timeout, config.timeout)
+		}
+		config.SetRequestTimeout(-time.Second)
+		if config.requestTimeout != RequestTimeout {
+			t.Errorf("SetRequestTimeout(-1s): expected default %v, recieved %v", RequestTimeout, config.requestTimeout)
+		}
+	})
+
+	t.Run("SetDelay negative falls back to default, zero stays", func(t *testing.T) {
+		config := &CrawlerConfig{}
+		config.SetDelay(-time.Second)
+		if config.delay != Delay {
+			t.Errorf("SetDelay(-1s): expected default %v, recieved %v", Delay, config.delay)
+		}
+		config.SetDelay(0)
+		if config.delay != 0 {
+			t.Errorf("SetDelay(0): expected 0, recieved %v", config.delay)
+		}
+	})
+
+	t.Run("SetOutput and SetLog blank fall back to defaults", func(t *testing.T) {
+		for _, v := range []string{"", "   "} {
+			config := &CrawlerConfig{}
+			config.SetOutput(v)
+			if config.output != OutputFilepath {
+				t.Errorf("SetOutput(%q): expected default %q, recieved %q", v, OutputFilepath, config.output)
+			}
+			config.SetLog(v)
+			if config.log != LogFilepath {
+				t.Errorf("SetLog(%q): expected default %q, recieved %q", v, LogFilepath, config.log)
+			}
+		}
+	})
+
+	t.Run("SetUrls skips blanks", func(t *testing.T) {
+		config := &CrawlerConfig{}
+		config.SetUrls("")
+		if len(config.urls) != 0 {
+			t.Fatalf("SetUrls(\"\"): expected 0 urls, recieved %d", len(config.urls))
+		}
+		config.SetUrls(" , , https://a.com, ")
+		if len(config.urls) != 1 {
+			t.Fatalf("expected 1 URL after blank skip, recieved %d", len(config.urls))
+		}
+		sliceConfig := &CrawlerConfig{}
+		sliceConfig.SetUrlsSlice([]string{"", "  ", "https://b.com"})
+		if len(sliceConfig.urls) != 1 {
+			t.Fatalf("expected 1 URL after blank skip, recieved %d", len(sliceConfig.urls))
+		}
+	})
+}
