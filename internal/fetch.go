@@ -18,6 +18,9 @@ type FetchClient struct{
 func (client* FetchClient) Init(config*CrawlerConfig){
 	client.client=http.Client{
     	Timeout: config.requestTimeout,
+    	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+             return http.ErrUseLastResponse
+         },
 	}
 	logErrFilepath:=client.extractErrStatusLogFilepath(config.log)
 	dir := filepath.Dir(logErrFilepath)
@@ -89,7 +92,8 @@ func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliC
 }
 
 func(client* FetchClient) processGet(ctx context.Context,url string,crawler *CliCrawler, retryAmount* int) (string,bool){
-	resp, err := client.client.Get(url)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	resp, err := client.client.Do(req)
 	if err!=nil{
 		client.errStatusLogger.Printf("Error while get request:%s",err.Error())
 		*retryAmount++
@@ -113,7 +117,8 @@ func(client* FetchClient) processGet(ctx context.Context,url string,crawler *Cli
 }
 
 func(client* FetchClient) processHead(ctx context.Context,url string,crawler *CliCrawler, retryAmount* int) (bool,bool){
-	resp, err := client.client.Head(url)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+	resp, err := client.client.Do(req)
 	if err!=nil{
 		client.errStatusLogger.Println("Error while get request:"+err.Error())
 		*retryAmount++
