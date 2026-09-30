@@ -58,16 +58,13 @@ go run ./cmd -urls https://example.com,https://google.com
 Офлайн-тесты (сеть не нужна):
 
 ```bash
-go test ./internal -run 'TestCrawlerConfig_Setters|TestExtractErrStatusLogFilepath|TestCliCrawler_Init|TestCliCrawler_CreateFile|TestCliCrawler_ParsePage|TestCliCrawler_Crawle|TestCrawle|TestSendNode'
+go test ./internal -run 'TestCrawlerConfig_Setters|TestExtractErrStatusLogFilepath|TestCliCrawler_Init|TestCliCrawler_CreateFile|TestCliCrawler_ParsePage|TestCliCrawler_Crawle|TestCrawle|TestSendNode|TestFetchClient_|TestStorage_'
 ```
-
-Полный `go test ./...` выполняет живые HTTP-запросы (google.com, httpbin.org и т.п.)
-и падает без интернета.
 
 ## Коды выхода
 
 | Код | Значение |
 |-----|----------|
-| `0` | Успех: результат сохранён. Сюда же входят частичный успех (часть сидов не скачалась) и graceful-разворот по `-timeout`/Ctrl+C — всё построенное сохраняется. |
+| `0` | Успех: результат сохранён. Сюда же входят частичный успех (часть не скачалась) и graceful-разворот по `-timeout`/Ctrl+C — всё построенное сохраняется. |
 | `1` | Тотальный фейл: нет валидных сидов, все запросы провалились или результат не записался. Причина печатается в stderr (`crawl failed: ...`), детали — в логе. Пустой результат (`[]`) при этом всё равно сохраняется. |
 | `2` | Неверные флаги (стандартно от `flag`: неизвестный флаг, `parse error`). |
