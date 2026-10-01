@@ -234,7 +234,7 @@ func TestFetchPage(t *testing.T) {
 			done <- client.FetchPage(ctx, deadUrl, crawler)
 		}()
 
-		waitForLog(t, client.extractErrStatusLogFilepath(config.log), "Error while get request", 5*time.Second)
+		waitForLog(t, client.extractErrStatusLogFilepath(config.log), "Error while GET request", 5*time.Second)
 		cancel()
 
 		select {

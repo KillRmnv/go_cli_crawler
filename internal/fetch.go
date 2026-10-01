@@ -107,7 +107,7 @@ func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliC
 			crawler.crawlerLogger.Println("Gracefully stopping fetching")
 			return ""
 		default:
-			if retryAmount < crawler.config.retry {
+			if retryAmount <= crawler.config.retry {
 				result, isContinue := client.processGet(ctx, url, crawler, &retryAmount)
 				if isContinue {
 					continue 
@@ -150,7 +150,7 @@ func(client* FetchClient) processGet(ctx context.Context, url string, crawler *C
 		return "", false
 	}
 	if resp.StatusCode >= 400 {
-		return "", false
+		return "", true
 	}
 
 	mt := mediaType(resp.Header.Get("Content-Type"))
