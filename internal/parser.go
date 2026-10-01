@@ -29,7 +29,7 @@ func (parser* StandardHTMLParser) ParsePage(page *string, domainUrl *string, pag
 		parser.logger.Println("Error parsing HTML:"+ err.Error())
 		return resource, nil
 	}
-
+	parser.logger.Printf("Successfully parsed:%s",*pageUrl)
 	title, hrefsToCrawl := parser.ExtractPageData(doc, baseURL, *domainUrl)
 	resource.Title = title
 
@@ -52,7 +52,7 @@ func  (parser* StandardHTMLParser)ExtractPageData(doc *html.Node, baseURL *url.U
 
 	var traverse func(*html.Node)
 	traverse = func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == "title" {
+		if n.Type == html.ElementNode && n.Data == "title" && title == "" {
 					var titleBuilder strings.Builder
 					for c := n.FirstChild; c != nil; c = c.NextSibling {
 						if c.Type == html.TextNode {
@@ -82,14 +82,16 @@ func  (parser* StandardHTMLParser)ExtractPageData(doc *html.Node, baseURL *url.U
 	return title, hrefs
 }
 
-func  (parser* StandardHTMLParser)processHref(rawHref string, baseURL *url.URL, targetDomain string) (string, bool) {
+func (parser *StandardHTMLParser) processHref(rawHref string, baseURL *url.URL, targetDomain string) (string, bool) {
+	rawHref = strings.TrimSpace(rawHref)
+
 	hrefURL, err := url.Parse(rawHref)
 	if err != nil {
-		return "", false 
+		parser.logger.Printf("Skipped invalid URL %q: %v\n", rawHref, err)
+		return "", false
 	}
-	
-	resolvedURL := baseURL.ResolveReference(hrefURL)
 
+	resolvedURL := baseURL.ResolveReference(hrefURL)
 	resolvedURL.Fragment = ""
 
 	if !strings.Contains(resolvedURL.Host, targetDomain) {
