@@ -82,21 +82,28 @@ func (client* FetchClient) extractErrStatusLogFilepath(logFilepath string) strin
 	}
 	return logFilepath+"_error.log"
 }
+
+type FetchPolicy interface{
+	FetchLogger() *log.Logger
+	MaxRetry() int
+	RetryDelay() time.Duration
+	MarkVisited(url string)
+}
 //планировщик go самостоятельно распределит ресурсы между корутинами, поэтому тут не вижу смысла параллелить
-func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliCrawler) string{
+func(client* FetchClient) FetchPage(ctx context.Context,url string,policy FetchPolicy) string{
 	if ctx.Err()!=nil{
 		return ""
 	}
-	crawler.crawlerLogger.Println("Trying to fetch:"+url)
+	policy.FetchLogger().Println("Trying to fetch:"+url)
 	if hasSkippedExt(url) {
-		crawler.crawlerLogger.Println("Skip by extension:" + url)
+		policy.FetchLogger().Println("Skip by extension:" + url)
 		return ""
 	}
 	select {
 		case client.semaphore <- struct{}{}: 
 			defer func() { <-client.semaphore }()
 		case <-ctx.Done():
-			crawler.crawlerLogger.Println("Gracefully stopping fetching (in queue)")
+			policy.FetchLogger().Println("Gracefully stopping fetching (in queue)")
 			return ""
 	}
 	
@@ -104,25 +111,25 @@ func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliC
 	for {
 		select {
 		case <-ctx.Done():
-			crawler.crawlerLogger.Println("Gracefully stopping fetching")
+			policy.FetchLogger().Println("Gracefully stopping fetching")
 			return ""
 		default:
-			if retryAmount <= crawler.config.retry {
-				result, isContinue := client.processGet(ctx, url, crawler, &retryAmount)
+			if retryAmount <= policy.MaxRetry() {
+				result, isContinue := client.processGet(ctx, url, policy, &retryAmount)
 				if isContinue {
 					continue 
 				}
 				return result 
 			} else {
-				crawler.crawlerLogger.Println("Can not reach resource after retries:" + url)
-				crawler.visited.Add(url)
+				policy.FetchLogger().Println("Can not reach resource after retries:" + url)
+				policy.MarkVisited(url)
 				return ""
 			}
 		}
 	}	
 }
 
-func(client* FetchClient) processGet(ctx context.Context, url string, crawler *CliCrawler, retryAmount* int) (string, bool) {
+func(client* FetchClient) processGet(ctx context.Context, url string, policy FetchPolicy, retryAmount* int) (string, bool) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -133,20 +140,20 @@ func(client* FetchClient) processGet(ctx context.Context, url string, crawler *C
 		client.errStatusLogger.Printf("Error while GET request:%s", err.Error())
 		*retryAmount++
 		select {
-		case <-time.After(crawler.config.delay):
-			crawler.crawlerLogger.Println("Gorutine try's again after delay:" + url)
+		case <-time.After(policy.RetryDelay()):
+			policy.FetchLogger().Println("Gorutine try's again after delay:" + url)
 			return "", true 
 		case <-ctx.Done():
-			crawler.crawlerLogger.Println("Gracefully stopping waiting")
+			policy.FetchLogger().Println("Gracefully stopping waiting")
 			return "", false
 		}
 	}
 	defer resp.Body.Close()
 	
-	crawler.visited.Add(url)
+	policy.MarkVisited(url)
 	client.errStatusLogger.Printf("Request status code:%s; Url:%s", resp.Status, url)
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-		crawler.crawlerLogger.Println("Skip redirect:" + url)
+		policy.FetchLogger().Println("Skip redirect:" + url)
 		return "", false
 	}
 	if resp.StatusCode >= 400 {
@@ -156,12 +163,12 @@ func(client* FetchClient) processGet(ctx context.Context, url string, crawler *C
 
 	mt := mediaType(resp.Header.Get("Content-Type"))
 	if !isHTMLType(mt) && !needsSniff(mt) {
-		crawler.crawlerLogger.Println("Skip non HTML resource:" + url + " Type:" + mt)
+		policy.FetchLogger().Println("Skip non HTML resource:" + url + " Type:" + mt)
 		return "", false
 	}
 
 	if resp.ContentLength > maxBodySize {
-		crawler.crawlerLogger.Println("Skip too large resource:" + url)
+		policy.FetchLogger().Println("Skip too large resource:" + url)
 		return "", false
 	}
 	
@@ -169,18 +176,18 @@ func(client* FetchClient) processGet(ctx context.Context, url string, crawler *C
 	if !isHTMLType(mt) {
 		head, _ := br.Peek(512)
 		if !strings.HasPrefix(http.DetectContentType(head), "text/html") {
-			crawler.crawlerLogger.Println("Skip by sniffing:" + url)
+			policy.FetchLogger().Println("Skip by sniffing:" + url)
 			return "", false
 		}
 	}
 
 	body, err := io.ReadAll(io.LimitReader(br, maxBodySize+1))
 	if err != nil {
-		crawler.crawlerLogger.Println("Error while reading body:" + err.Error())
+		policy.FetchLogger().Println("Error while reading body:" + err.Error())
 		return "", false
 	}
 	if len(body) > maxBodySize {
-		crawler.crawlerLogger.Println("Body exceeds limit:" + url)
+		policy.FetchLogger().Println("Body exceeds limit:" + url)
 		return "", false
 	}
 	return string(body), false

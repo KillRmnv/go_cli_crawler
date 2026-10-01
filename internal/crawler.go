@@ -65,6 +65,19 @@ func (crawler* CliCrawler) Init(config* CrawlerConfig){
 	crawler.storage=&JSONStorage{filepath: crawler.config.output,logger:*log.New(logFile, "[STORAGE] ", log.LstdFlags|log.Lshortfile) }
 }
 
+func (crawler* CliCrawler) FetchLogger() *log.Logger{
+	return &crawler.crawlerLogger
+}
+func (crawler* CliCrawler) MaxRetry() int{
+	return crawler.config.retry
+}
+func (crawler* CliCrawler) RetryDelay() time.Duration{
+	return crawler.config.delay
+}
+func (crawler* CliCrawler) MarkVisited(url string){
+	crawler.visited.Add(url)
+}
+
 func (crawler* CliCrawler) Crawle() ([]byte,error){
 	var result []ResourseNode
 	crawler.crawlerLogger.Printf("Config:%v",crawler.config)
