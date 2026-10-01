@@ -55,10 +55,8 @@ go run ./cmd -urls https://example.com,https://google.com
 
 ## Тесты
 
-Офлайн-тесты (сеть не нужна):
-
 ```bash
-go test ./internal -run 'TestCrawlerConfig_Setters|TestExtractErrStatusLogFilepath|TestCliCrawler_Init|TestCliCrawler_CreateFile|TestCliCrawler_ParsePage|TestCliCrawler_Crawle|TestCrawle|TestSendNode|TestFetchClient_|TestStorage_'
+go test -count=1 -cover ./...
 ```
 
 ## Коды выхода
