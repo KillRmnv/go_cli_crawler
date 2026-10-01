@@ -8,14 +8,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 	"github.com/deckarep/golang-set/v2"
 )
-
+const maxConcurrentRequests = 10
 type CliCrawler struct{
 	config CrawlerConfig // только чтение, поэтому также безопасен
 	visited mapset.Set[string] // потокобезопасная реализация множества
@@ -60,7 +59,7 @@ func (crawler* CliCrawler) Init(config* CrawlerConfig){
 	outFile.Close()
 	crawler.visited=mapset.NewSet[string]()
 	crawler.fetchClient.Init(config)
-	crawler.amountOfGorutines=runtime.NumCPU()*5
+	crawler.amountOfGorutines=maxConcurrentRequests
 	crawler.semaphore = make(chan struct{}, crawler.amountOfGorutines)
 	crawler.parser=&StandardHTMLParser{logger: *log.New(logFile, "[PARSER] ", log.LstdFlags|log.Lshortfile),iterateStubs: config.stubs}
 	crawler.storage=&JSONStorage{filepath: crawler.config.output,logger:*log.New(logFile, "[STORAGE] ", log.LstdFlags|log.Lshortfile) }
@@ -90,16 +89,8 @@ func (crawler* CliCrawler) Crawle() ([]byte,error){
             continue
         }
         wg.Add(1)
-        
-        crawler.semaphore <- struct{}{}
-        
-        go func(u Url, d string) {
-            
-            defer func() { <-crawler.semaphore }() 
-            
-            crawler.crawleInside(0, ctx, u, resourseChans, &wg, &d)
-        }(seedURL, *seedDomain)
-    }
+			go crawler.crawleInside(0, ctx, seedURL, resourseChans, &wg, seedDomain)
+		}
     wg.Wait()
     crawler.crawlerLogger.Println("Closing chans for root")
 	}()
@@ -122,19 +113,36 @@ func (crawler* CliCrawler) Crawle() ([]byte,error){
 	return data,nil
 }
 
-// depth должна копироваться, ctx интерфейс, поэтому по дефолту ссылка
+func (crawler *CliCrawler) acquire(ctx context.Context) bool {
+	select {
+	case crawler.semaphore <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
 func (crawler* CliCrawler) crawleInside(depth int, ctx context.Context, url Url, resources chan ResourseNode, wgParent* sync.WaitGroup, domain*string) { 
     defer wgParent.Done()
-    
-    page := crawler.fetchClient.FetchPage(ctx, url.adress, crawler)
-    if len(page) == 0 {
+	if !crawler.acquire(ctx) {
+		return
+	}
+	page := crawler.fetchClient.FetchPage(ctx, url.adress, crawler)
+	var resourceNode ResourseNode
+	var hrefsToCrawl []string
+	if len(page) > 0 {
+		resourceNode, hrefsToCrawl = crawler.parser.ParsePage(&page, domain, &url.adress)
+	}
+	<-crawler.semaphore
+
+	if len(page) == 0 {
         return 
     }
-    
-    var resourceNode ResourseNode
-    resourceNode, hrefsToCrawl := crawler.parser.ParsePage(&page, domain, &url.adress)
-    
-    if depth < crawler.config.depth {
+	if resourceNode.Links == nil {
+		resourceNode.Links = []ResourseNode{}
+	}
+
+	if depth < crawler.config.depth {
         pageUrl := resourceNode.Resourse
         resourseChans := make(chan ResourseNode, crawler.amountOfGorutines)
         var wg sync.WaitGroup
@@ -152,41 +160,17 @@ func (crawler* CliCrawler) crawleInside(depth int, ctx context.Context, url Url,
                 
                 crawler.crawlerLogger.Println("["+pageUrl+"]"+"Crawling to "+href)
                 wg.Add(1)
-                
-                crawler.semaphore <- struct{}{}
-                
-                go func(u Url) {
-                    
-                    defer func() { <-crawler.semaphore }()
-                    
-                    crawler.crawleInside(depth+1, ctx, u, resourseChans, &wg, domain)
-                }(NewUrl(href))
-            }
-            wg.Wait()
+				go crawler.crawleInside(depth+1, ctx, NewUrl(href), resourseChans, &wg, domain)
+			}
+			wg.Wait()
             crawler.crawlerLogger.Println("Closing chans for "+url.adress)
         }()
-    
         for resource := range resourseChans {
             resourceNode.Links = append(resourceNode.Links, resource)
         }
     }
-    
-    if !crawler.sendNode(resources, resourceNode, ctx) {
-        crawler.crawlerLogger.Println("Node dropped on cancel: "+url.adress)
-    }
-}
-func (crawler* CliCrawler) sendNode(resources chan ResourseNode, node ResourseNode, ctx context.Context) bool{
-	select{
-		case resources<-node:
-			return true
-		default:
-			select{
-				case resources<-node:
-					return true
-				case <-ctx.Done():
-					return false
-			}
-	}
+
+	resources <- resourceNode
 }
 
 func (crawler* CliCrawler) extractUrlsDomains() ([]Url,[]string){

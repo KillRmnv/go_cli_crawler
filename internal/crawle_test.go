@@ -1,7 +1,7 @@
 package clicrawler
 
 import (
-	"context"
+
 	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
@@ -264,52 +264,4 @@ func TestCliCrawler_Init_KeepsConfigAndRenamesOutput(t *testing.T) {
 	if data, _ := os.ReadFile(outFile); string(data) != "old result" {
 		t.Errorf("previous result must stay untouched, got %q", data)
 	}
-}
-
-func TestSendNode(t *testing.T) {
-	node := ResourseNode{Resourse: "example.com", Title: "Test"}
-	crawler := &CliCrawler{}
-	t.Run("Live ctx with buffered channel", func(t *testing.T) {
-		ch := make(chan ResourseNode, 1)
-		crawler := &CliCrawler{}
-		if !crawler.sendNode(ch, node, context.Background()) {
-			t.Fatal("sendNode must deliver when channel has space")
-		}
-		if got := <-ch; got.Title != node.Title {
-			t.Errorf("got %q, want %q", got.Title, node.Title)
-		}
-	})
-
-	t.Run("Cancelled ctx with waiting reader", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		ch := make(chan ResourseNode)
-		received := make(chan ResourseNode, 1)
-		go func() { received <- <-ch }()
-		time.Sleep(10 * time.Millisecond)
-
-		if !crawler.sendNode(ch, node, ctx) {
-			t.Fatal("node must be delivered to a waiting reader even when ctx is done")
-		}
-		if got := <-received; got.Resourse != node.Resourse {
-			t.Errorf("got %q, want %q", got.Resourse, node.Resourse)
-		}
-	})
-
-	t.Run("Cancelled ctx without reader", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		ch := make(chan ResourseNode)
-		done := make(chan bool, 1)
-		go func() { done <- crawler.sendNode(ch, node, ctx) }()
-
-		select {
-		case ok := <-done:
-			if ok {
-				t.Error("sendNode must report drop when blocked and ctx is done")
-			}
-		case <-time.After(2 * time.Second):
-			t.Fatal("sendNode hung without reader")
-		}
-	})
 }
