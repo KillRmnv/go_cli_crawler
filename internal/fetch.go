@@ -1,11 +1,15 @@
 package clicrawler
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"log"
+	"mime"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -14,6 +18,41 @@ type FetchClient struct{
 	client http.Client // потокобезопасен
 	errStatusLogger log.Logger // базовая реализация логгера потокобезопасна
 	semaphore       chan struct{}
+}
+const maxBodySize = 5 * 1024 * 1024
+
+var skipExt = map[string]struct{}{
+	".jpg": {}, ".jpeg": {}, ".png": {}, ".gif": {}, ".webp": {}, ".svg": {}, ".ico": {},
+	".pdf": {}, ".zip": {}, ".rar": {}, ".7z": {}, ".gz": {}, ".tar": {},
+	".mp3": {}, ".mp4": {}, ".avi": {}, ".mkv": {}, ".mov": {},
+	".exe": {}, ".msi": {}, ".dmg": {}, ".iso": {}, ".apk": {},
+	".doc": {}, ".docx": {}, ".xls": {}, ".xlsx": {}, ".ppt": {}, ".pptx": {},
+	".css": {}, ".js": {}, ".woff": {}, ".woff2": {}, ".ttf": {},
+}
+
+func hasSkippedExt(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	_, skip := skipExt[strings.ToLower(path.Ext(u.Path))]
+	return skip
+}
+
+func mediaType(ct string) string {
+	mt, _, err := mime.ParseMediaType(ct)
+	if err != nil {
+		return ""
+	}
+	return mt
+}
+
+func isHTMLType(mt string) bool {
+	return mt == "text/html" || mt == "application/xhtml+xml"
+}
+
+func needsSniff(mt string) bool {
+	return mt == "" || mt == "text/plain" || mt == "application/octet-stream"
 }
 func (client* FetchClient) Init(config*CrawlerConfig){
 	client.client=http.Client{
@@ -49,6 +88,10 @@ func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliC
 		return ""
 	}
 	crawler.crawlerLogger.Println("Trying to fetch:"+url)
+	if hasSkippedExt(url) {
+		crawler.crawlerLogger.Println("Skip by extension:" + url)
+		return ""
+	}
 	select {
 		case client.semaphore <- struct{}{}: 
 			defer func() { <-client.semaphore }()
@@ -56,91 +99,88 @@ func(client* FetchClient) FetchPage(ctx context.Context,url string,crawler *CliC
 			crawler.crawlerLogger.Println("Gracefully stopping fetching (in queue)")
 			return ""
 	}
-	retryAmount,isOkFormat:=0,false
-	for{
-		select{	
-			case <-ctx.Done():
-				crawler.crawlerLogger.Println("Gracefully stopping fetching")
+	
+	retryAmount := 0
+	for {
+		select {
+		case <-ctx.Done():
+			crawler.crawlerLogger.Println("Gracefully stopping fetching")
+			return ""
+		default:
+			if retryAmount < crawler.config.retry {
+				result, isContinue := client.processGet(ctx, url, crawler, &retryAmount)
+				if isContinue {
+					continue 
+				}
+				return result 
+			} else {
+				crawler.crawlerLogger.Println("Can not reach resource after retries:" + url)
+				crawler.visited.Add(url)
 				return ""
-			default:
-				if !isOkFormat{
-					if(retryAmount<crawler.config.retry){
-						isHtml,isContinue:=client.processHead(ctx,url,crawler,&retryAmount)
-						crawler.visited.Add(url)
-						if isContinue{
-							continue
-						}
-						if !isHtml {
-							return ""
-						}		
-					}
-					isOkFormat=true
-					retryAmount=0
-				}
-				if(retryAmount<crawler.config.retry){
-					result,flag:=client.processGet(ctx,url,crawler,&retryAmount)
-					if !flag{
-						return result
-					}
-				}else{
-					crawler.crawlerLogger.Println("Can not reach resource:"+url)
-					crawler.visited.Add(url)
-					return ""
-				}
+			}
 		}
-	}		
+	}	
 }
 
-func(client* FetchClient) processGet(ctx context.Context,url string,crawler *CliCrawler, retryAmount* int) (string,bool){
+func(client* FetchClient) processGet(ctx context.Context, url string, crawler *CliCrawler, retryAmount* int) (string, bool) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	resp, err := client.client.Do(req)
-	if err!=nil{
-		client.errStatusLogger.Printf("Error while get request:%s",err.Error())
-		*retryAmount++
-		select {
-			case <-time.After(crawler.config.delay):
-				crawler.crawlerLogger.Println("Gorutine try's again after delay:"+url)
-				return "",true
-			case <-ctx.Done():
-				crawler.crawlerLogger.Println("Gracefully stopping waiting")
-				return "",false
-			}
-	}
-	defer resp.Body.Close()
-	crawler.visited.Add(url)			
-	client.errStatusLogger.Printf("Request status code:%s; Url:%s",resp.Status,url)
-	body,err:=io.ReadAll(resp.Body)
-	if(err!=nil){
-		crawler.crawlerLogger.Println("Error while reading body:"+err.Error())
-	}
-	return string(body),false
-}
+	
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,*/*;q=0.8")
 
-func(client* FetchClient) processHead(ctx context.Context,url string,crawler *CliCrawler, retryAmount* int) (bool,bool){
-	req, _ := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
 	resp, err := client.client.Do(req)
-	if err!=nil{
-		client.errStatusLogger.Println("Error while get request:"+err.Error())
+	if err != nil {
+		client.errStatusLogger.Printf("Error while GET request:%s", err.Error())
 		*retryAmount++
 		select {
-			case <-time.After(crawler.config.delay):
-				crawler.crawlerLogger.Println("Gorutine try's again after delay:"+url)
-				return false,true
-			case <-ctx.Done():
-				crawler.crawlerLogger.Println("Gracefully stopping waiting")
-				return false,false
-			}
+		case <-time.After(crawler.config.delay):
+			crawler.crawlerLogger.Println("Gorutine try's again after delay:" + url)
+			return "", true 
+		case <-ctx.Done():
+			crawler.crawlerLogger.Println("Gracefully stopping waiting")
+			return "", false
+		}
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode>=400{
-		client.errStatusLogger.Printf("Request status code:%s; Url:%s",resp.Status,url)
-		return true,false
+	
+	crawler.visited.Add(url)
+	client.errStatusLogger.Printf("Request status code:%s; Url:%s", resp.Status, url)
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		crawler.crawlerLogger.Println("Skip redirect:" + url)
+		return "", false
 	}
-	contentType := resp.Header.Get("Content-Type")
-	if !strings.Contains(contentType, "text/html") {
-	    crawler.crawlerLogger.Println("Skip non HTML resource:"+url+ " Тип:"+ contentType)
-	    return false,false
-	}			
-	client.errStatusLogger.Printf("Request status code:%s; Url:%s",resp.Status,url)
-	return true,false
+	if resp.StatusCode >= 400 {
+		return "", false
+	}
+
+	mt := mediaType(resp.Header.Get("Content-Type"))
+	if !isHTMLType(mt) && !needsSniff(mt) {
+		crawler.crawlerLogger.Println("Skip non HTML resource:" + url + " Type:" + mt)
+		return "", false
+	}
+
+	if resp.ContentLength > maxBodySize {
+		crawler.crawlerLogger.Println("Skip too large resource:" + url)
+		return "", false
+	}
+	
+	br := bufio.NewReaderSize(resp.Body, 1024)
+	if !isHTMLType(mt) {
+		head, _ := br.Peek(512)
+		if !strings.HasPrefix(http.DetectContentType(head), "text/html") {
+			crawler.crawlerLogger.Println("Skip by sniffing:" + url)
+			return "", false
+		}
+	}
+
+	body, err := io.ReadAll(io.LimitReader(br, maxBodySize+1))
+	if err != nil {
+		crawler.crawlerLogger.Println("Error while reading body:" + err.Error())
+		return "", false
+	}
+	if len(body) > maxBodySize {
+		crawler.crawlerLogger.Println("Body exceeds limit:" + url)
+		return "", false
+	}
+	return string(body), false
 }
