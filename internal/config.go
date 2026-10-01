@@ -10,7 +10,7 @@ const(
 	RequestTimeout=10*time.Second
 	OutputFilepath="./out/result.json"
 	LogFilepath="./log/crawler.log"
-	Retry=1
+	Retry=0
 	Delay=0*time.Second
 	Stubs=false
 )

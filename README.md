@@ -14,18 +14,22 @@ go build -o crawler ./cmd
 
 ```bash
 ./crawler \
-  -urls https://example.com,https://google.com \
-  -depth 4 \
-  -timeout 2m \
-  -request-timeout 10s \
-  -retry 1 \
-  -delay 0s \
-  -output ./out/result.json \
-  -log ./log/crawler.log
+        --urls https://go.dev/ \
+        --depth 1 \
+        --timeout 2m \
+        --request-timeout 10s \
+        --output ./out/result.json \
+        --log ./log/crawler.log
 ```
 
 ```bash
-go run ./cmd -urls https://example.com,https://google.com
+go run ./cmd/ \
+        --urls https://quotes.toscrape.com/ \
+        --depth 2 \
+        --timeout 2m \
+        --request-timeout 10s \
+        --output ./out/result.json \
+        --log ./log/crawler.log
 ```
 
 ## Флаги

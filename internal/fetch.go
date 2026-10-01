@@ -150,6 +150,7 @@ func(client* FetchClient) processGet(ctx context.Context, url string, crawler *C
 		return "", false
 	}
 	if resp.StatusCode >= 400 {
+		*retryAmount++
 		return "", true
 	}
 
