@@ -7,6 +7,10 @@ import (
 	"os"
 )
 
+type Storage interface {
+	Save(data []ResourseNode) ([]byte,error)
+}
+
 type JSONStorage struct {
 	filepath string
 	logger log.Logger

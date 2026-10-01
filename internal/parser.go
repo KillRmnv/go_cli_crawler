@@ -8,6 +8,11 @@ import (
 	"golang.org/x/net/html"
 )
 
+type Parser interface {
+ 	ParsePage(page *string, domainUrl *string, pageUrl* string) (ResourseNode, []string)
+   	ExtractPageData(doc *html.Node, baseURL *url.URL, domain string) (string, []string)
+}
+
 type StandardHTMLParser struct{
 	logger log.Logger
 	iterateStubs bool
