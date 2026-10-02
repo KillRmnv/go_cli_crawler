@@ -140,6 +140,105 @@ func waitForLog(t *testing.T, path, substr string, timeout time.Duration) string
 	}
 }
 
+func TestFetchPage_FetchStartedMarksRealRequests(t *testing.T) {
+	crawler, client, config := newFetchFixture(t, nil)
+
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<html><head><title>In flight</title></head><body></body></html>`))
+	}))
+	defer server.Close()
+
+	for i := 0; i < cap(client.semaphore); i++ {
+		client.semaphore <- struct{}{}
+	}
+	releaseSemaphore := func() {
+		for i := 0; i < cap(client.semaphore); i++ {
+			<-client.semaphore
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan string, 1)
+	go func() { done <- client.FetchPage(ctx, server.URL+"/queued", crawler) }()
+
+	waitForLog(t, config.log, "Trying to fetch:"+server.URL+"/queued", 5*time.Second)
+	time.Sleep(200 * time.Millisecond)
+	if data, _ := os.ReadFile(config.log); strings.Contains(string(data), "Fetch started:"+server.URL+"/queued") {
+		t.Error("Fetch started must be logged only after the semaphore is acquired")
+	}
+	if attempts.Load() != 0 {
+		t.Errorf("no request may be sent while queued, attempts=%d", attempts.Load())
+	}
+
+	cancel()
+	if result := <-done; result != "" {
+		t.Errorf("expected empty string on cancel, but returned: %q", result)
+	}
+
+	releaseSemaphore()
+	if result := client.FetchPage(context.Background(), server.URL+"/started", crawler); !strings.Contains(result, "In flight") {
+		t.Errorf("expected page body, recieved %q", result)
+	}
+	if data, _ := os.ReadFile(config.log); !strings.Contains(string(data), "Fetch started:"+server.URL+"/started") {
+		t.Error("Fetch started must be logged once the request is really sent")
+	}
+}
+
+func TestFetchPage_NoDelayWhenRetriesExhausted(t *testing.T) {
+	deadServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	deadUrl := deadServer.URL
+	deadServer.Close()
+
+	t.Run("retry=0 does not wait for delay", func(t *testing.T) {
+		crawler, client, config := newFetchFixture(t, func(c *CrawlerConfig) {
+			c.SetDelay(30 * time.Second)
+			c.SetRetry(0)
+		})
+
+		start := time.Now()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if result := client.FetchPage(ctx, deadUrl, crawler); result != "" {
+			t.Errorf("expected empty string, recieved %q", result)
+		}
+		if elapsed := time.Since(start); elapsed > 5*time.Second {
+			t.Errorf("exhausted retry budget must not wait the delay, took %s", elapsed)
+		}
+
+		data, _ := os.ReadFile(config.log)
+		if strings.Contains(string(data), "Gorutine try's again after delay") {
+			t.Error("no retry follows, so the log must not promise one")
+		}
+		if !strings.Contains(string(data), "Can not reach resource after retries") {
+			t.Error("giving up must be logged")
+		}
+	})
+
+	t.Run("retry=1 still waits delay and retries", func(t *testing.T) {
+		crawler, client, config := newFetchFixture(t, func(c *CrawlerConfig) {
+			c.SetDelay(10 * time.Millisecond)
+			c.SetRetry(1)
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if result := client.FetchPage(ctx, deadUrl, crawler); result != "" {
+			t.Errorf("expected empty string, recieved %q", result)
+		}
+		data, _ := os.ReadFile(config.log)
+		if !strings.Contains(string(data), "Gorutine try's again after delay") {
+			t.Error("a real retry must still be announced")
+		}
+	})
+}
+
 func TestFetchPage(t *testing.T) {
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/image") {
