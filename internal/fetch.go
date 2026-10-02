@@ -102,6 +102,7 @@ func(client* FetchClient) FetchPage(ctx context.Context,url string,policy FetchP
 	select {
 		case client.semaphore <- struct{}{}: 
 			defer func() { <-client.semaphore }()
+			policy.FetchLogger().Println("Fetch started:" + url)
 		case <-ctx.Done():
 			policy.FetchLogger().Println("Gracefully stopping fetching (in queue)")
 			return ""
@@ -130,7 +131,11 @@ func(client* FetchClient) FetchPage(ctx context.Context,url string,policy FetchP
 }
 
 func(client* FetchClient) processGet(ctx context.Context, url string, policy FetchPolicy, retryAmount* int) (string, bool) {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err!=nil{
+		client.errStatusLogger.Printf("Can not build request for:%s (%s)", url, err.Error())
+		return "", false
+	}
 	
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	req.Header.Set("Accept", "text/html,*/*;q=0.8")
@@ -139,6 +144,9 @@ func(client* FetchClient) processGet(ctx context.Context, url string, policy Fet
 	if err != nil {
 		client.errStatusLogger.Printf("Error while GET request:%s", err.Error())
 		*retryAmount++
+		if *retryAmount > policy.MaxRetry(){
+			return "", true
+		}
 		select {
 		case <-time.After(policy.RetryDelay()):
 			policy.FetchLogger().Println("Gorutine try's again after delay:" + url)
