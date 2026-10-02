@@ -35,6 +35,7 @@ func (parser* StandardHTMLParser) ParsePage(page *string, domainUrl *string, pag
 		return resource, nil
 	}
 	parser.logger.Printf("Successfully parsed:%s",*pageUrl)
+	baseURL = parser.applyBaseHref(doc, baseURL)
 	title, hrefsToCrawl := parser.ExtractPageData(doc, baseURL, *domainUrl)
 	resource.Title = title
 
@@ -49,6 +50,47 @@ func (parser* StandardHTMLParser) ParsePage(page *string, domainUrl *string, pag
 	parser.logger.Printf("Found links on page %s: %d\n", resource.Title, len(hrefsToCrawl))
 	
 	return resource, hrefsToCrawl
+}
+
+
+func (parser* StandardHTMLParser) applyBaseHref(doc *html.Node, baseURL *url.URL) *url.URL{
+	rawBase:= parser.findBaseHref(doc)
+	if rawBase==""{
+		return baseURL
+	}
+	parsedBase, err := url.Parse(strings.TrimSpace(rawBase))
+	if err!=nil{
+		parser.logger.Printf("Skipped invalid <base href> %q: %v\n", rawBase, err)
+		return baseURL
+	}
+	resolvedBase:= baseURL.ResolveReference(parsedBase)
+	resolvedBase.Fragment= ""
+	resolvedBase.RawFragment= ""
+	parser.logger.Printf("Using <base href> %q for page %s\n", resolvedBase.String(), baseURL.String())
+	return resolvedBase
+}
+
+func (parser* StandardHTMLParser) findBaseHref(doc *html.Node) string{
+	var found string
+	var traverse func(*html.Node)
+	traverse= func(n *html.Node){
+		if found!=""{
+			return
+		}
+		if n.Type== html.ElementNode && n.Data=="base"{
+			for _, attr := range n.Attr{
+				if attr.Key=="href"{
+					found= attr.Val
+					return
+				}
+			}
+		}
+		for c:= n.FirstChild; c!=nil && found==""; c=c.NextSibling{
+			traverse(c)
+		}
+	}
+	traverse(doc)
+	return found
 }
 
 func  (parser* StandardHTMLParser)ExtractPageData(doc *html.Node, baseURL *url.URL, domain string) (string, []string) {
@@ -99,7 +141,7 @@ func (parser *StandardHTMLParser) processHref(rawHref string, baseURL *url.URL, 
 	resolvedURL := baseURL.ResolveReference(hrefURL)
 	resolvedURL.Fragment = ""
 
-	if !strings.Contains(resolvedURL.Host, targetDomain) {
+	if !hostInScope(resolvedURL.Host, targetDomain) {
 		return "", false
 	}
 
