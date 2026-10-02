@@ -190,7 +190,7 @@ func (crawler* CliCrawler) extractUrlsDomains() ([]Url,[]string){
 	var links []Url
 	var domains []string
 	for _,u := range crawler.config.urls{
-		domain,err:=u.ExtractDomain()
+		domain,err:=u.SiteHost()
 		if(err!=nil){
 			crawler.crawlerLogger.Println("Invalid url: "+u.adress+" ("+err.Error()+")")
 			continue
