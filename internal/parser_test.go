@@ -87,6 +87,118 @@ func TestParser_ParsePage_StubsFlag(t *testing.T) {
 		t.Errorf("stubs=false: links must contain no stubs, got %d", len(node.Links))
 	}
 }
+func TestParser_BaseHref(t *testing.T) {
+	parser := &StandardHTMLParser{
+		logger:       *log.New(io.Discard, "", 0),
+		iterateStubs: true,
+	}
+	pageUrl := "https://example.com/folder/subfolder/index.html"
+	domainUrl := "example.com"
+
+	t.Run("Absolute base redirects relative links", func(t *testing.T) {
+		htmlPage := `<html><head><base href="https://example.com/root/"><title>T</title></head><body>
+			<a href="page.html">rel</a>
+			<a href="/absolute.html">abs</a>
+			<a href="https://other.com/x">ext</a>
+			</body></html>`
+
+		_, hrefs := parser.ParsePage(&htmlPage, &domainUrl, &pageUrl)
+		expected := []string{"https://example.com/root/page.html", "https://example.com/absolute.html"}
+		assertHrefs(t, expected, hrefs)
+	})
+
+	t.Run("Relative base is resolved against page url", func(t *testing.T) {
+		htmlPage := `<html><head><base href="../assets/"><title>T</title></head><body><a href="page.html">rel</a></body></html>`
+
+		_, hrefs := parser.ParsePage(&htmlPage, &domainUrl, &pageUrl)
+		assertHrefs(t, []string{"https://example.com/folder/assets/page.html"}, hrefs)
+	})
+
+	t.Run("First base in document wins", func(t *testing.T) {
+		htmlPage := `<html><head>
+			<base href="https://example.com/first/">
+			<base href="https://example.com/second/">
+			</head><body><a href="page.html">rel</a></body></html>`
+
+		_, hrefs := parser.ParsePage(&htmlPage, &domainUrl, &pageUrl)
+		assertHrefs(t, []string{"https://example.com/first/page.html"}, hrefs)
+	})
+
+	t.Run("Base fragment and query do not leak into links", func(t *testing.T) {
+		htmlPage := `<html><head><base href="https://example.com/root/#frag"></head><body><a href="page.html">rel</a></body></html>`
+
+		_, hrefs := parser.ParsePage(&htmlPage, &domainUrl, &pageUrl)
+		assertHrefs(t, []string{"https://example.com/root/page.html"}, hrefs)
+	})
+
+	t.Run("Page without base resolves against itself", func(t *testing.T) {
+		htmlPage := `<html><head><title>T</title></head><body><a href="page.html">rel</a></body></html>`
+
+		_, hrefs := parser.ParsePage(&htmlPage, &domainUrl, &pageUrl)
+		assertHrefs(t, []string{"https://example.com/folder/subfolder/page.html"}, hrefs)
+	})
+
+	t.Run("Invalid base falls back to page url", func(t *testing.T) {
+		htmlPage := `<html><head><base href="://bad"></head><body><a href="page.html">rel</a></body></html>`
+
+		_, hrefs := parser.ParsePage(&htmlPage, &domainUrl, &pageUrl)
+		assertHrefs(t, []string{"https://example.com/folder/subfolder/page.html"}, hrefs)
+	})
+
+	t.Run("Base cannot widen the crawl scope", func(t *testing.T) {
+		htmlPage := `<html><head><base href="https://other.com/"></head><body><a href="page.html">rel</a></body></html>`
+
+		_, hrefs := parser.ParsePage(&htmlPage, &domainUrl, &pageUrl)
+		if len(hrefs) != 0 {
+			t.Errorf("links from a foreign <base href> must be dropped, got %v", hrefs)
+		}
+	})
+}
+
+func TestParser_DomainScope(t *testing.T) {
+	parser := &StandardHTMLParser{
+		logger:       *log.New(io.Discard, "", 0),
+		iterateStubs: true,
+	}
+	pageUrl := "https://example.com/index.html"
+	domainUrl := "example.com"
+
+	t.Run("Subdomains are crawled, lookalikes are not", func(t *testing.T) {
+		htmlPage := `<html><head><title>T</title></head><body>
+			<a href="https://blog.example.com/post">sub</a>
+			<a href="https://www.example.com/">www</a>
+			<a href="https://myexample.com/x">prefix lookalike</a>
+			<a href="https://example.com.evil.com/x">suffix lookalike</a>
+			<a href="https://notexample.com/x">other lookalike</a>
+			</body></html>`
+
+		_, hrefs := parser.ParsePage(&htmlPage, &domainUrl, &pageUrl)
+		assertHrefs(t, []string{
+			"https://blog.example.com/post",
+			"https://www.example.com/",
+		}, hrefs)
+	})
+
+	t.Run("Port does not change the scope", func(t *testing.T) {
+		htmlPage := `<html><head><title>T</title></head><body><a href="http://example.com:8080/x">other port</a></body></html>`
+
+		_, hrefs := parser.ParsePage(&htmlPage, &domainUrl, &pageUrl)
+		assertHrefs(t, []string{"http://example.com:8080/x"}, hrefs)
+	})
+}
+
+func assertHrefs(t *testing.T, expected []string, got []string) {
+	t.Helper()
+	if len(got) != len(expected) {
+		t.Fatalf("expected %d links %v, recieved %d: %v", len(expected), expected, len(got), got)
+	}
+	for i, want := range expected {
+		if got[i] != want {
+			t.Errorf("link mismatch at index %d.\nExpected: %q\nGot:      %q", i, want, got[i])
+		}
+	}
+}
+
 func TestParser_RelativeAndSpecialLinks(t *testing.T) {
 	parser := &StandardHTMLParser{
 		logger:       *log.New(io.Discard, "", 0),
